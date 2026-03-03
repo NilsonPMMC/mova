@@ -92,24 +92,18 @@ class LLMService:
             system_message = """
 Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
 
-Retorne APENAS um objeto JSON válido, sem markdown, sem texto antes ou depois.
-
-O JSON DEVE conter OBRIGATORIAMENTE estas chaves:
-- category: string com o nome da categoria sugerida (ex.: "Iluminação Pública", "Buraco em Via/Pavimentação")
-- urgency_level: inteiro de 1 (pouco urgente) a 5 (crítico/risco de vida)
-- sentiment: float entre -1.0 (muito negativo/raiva) e 1.0 (positivo/elogio)
-
-Você PODE opcionalmente incluir:
-- summary: string com um resumo executivo em UMA frase
-- keywords: array de 3 a 5 palavras-chave importantes do texto
+Responda APENAS com um JSON válido, sem markdown, sem texto antes ou depois, contendo EXATAMENTE as seguintes chaves:
+- 'category': nome da categoria sugerida, usando APENAS categorias oficiais de Ouvidoria já definidas (ex.: "Iluminação Pública", "Infraestrutura", "Saúde/Falta de Médico", "Coleta de Lixo", "Zeladoria", "Trânsito", "Segurança", "Meio Ambiente", "Outros"). NÃO INVENTE NOMES NOVOS.
+- 'urgency_level': inteiro de 1 a 5. USE ESTA RÉGUA: 1 = Dúvida/Informação; 2 = Serviço de rotina; 3 = Incômodo/Demora (ex.: buracos, lâmpadas queimadas, mato alto); 4 = Risco material (risco de dano a patrimônio); 5 = Risco IMINENTE à vida ou desastre. Um buraco comum é NO MÁXIMO nível 3, a menos que haja relato explícito de acidente grave ou risco imediato à vida.
+- 'sentiment': float entre -1.0 e 1.0. Use -1.0 APENAS para xingamentos ou fúria extrema; neutro (~0.0) para dúvidas; positivo (>0.0) para elogios.
+- 'summary': resumo de 5 a 10 palavras sobre o caso. É PROIBIDO deixar vazio.
+- 'keywords': lista com 3 a 5 palavras cruciais do texto (ex.: ["buraco", "avenida", "trânsito"]). É PROIBIDO deixar vazio.
 
 Regras importantes:
-- category deve usar nomes claros, compatíveis com categorias de Ouvidoria (ex.: "Iluminação Pública", "Buraco em Via/Pavimentação", "Saúde/Falta de Médico", "Coleta de Lixo", "Zeladoria", "Trânsito", "Segurança", "Meio Ambiente").
-- urgency_level = 5 para risco de vida ou emergências graves; 1 para casos de baixa prioridade.
-- sentiment negativo (perto de -1.0) para reclamações fortes/raiva, neutro (~0.0) para dúvidas, positivo (>0.0) para elogios.
+- category deve usar nomes claros, compatíveis com categorias de Ouvidoria (ex.: "Iluminação Pública", "Infraestrutura", "Saúde/Falta de Médico", "Coleta de Lixo", "Zeladoria", "Trânsito", "Segurança", "Meio Ambiente", "Outros").
 
 IMPORTANTE:
-- Responda APENAS com o JSON. NÃO inclua comentários, markdown ou texto solto.
+- Retorne APENAS o JSON. NÃO inclua comentários, markdown ou texto solto.
 """
 
             payload = {
