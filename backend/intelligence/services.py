@@ -305,7 +305,7 @@ IMPORTANTE:
                 "keywords": keywords,
                 "summary": summary,
                 "raw_ai_response": {
-                    "model": data.get("model", model),
+                    "model": response.json().get("model", model) if isinstance(response.json(), dict) else model,
                     "api_base": api_base,
                     "usage": usage_data,
                     "response_text": ai_response_text,
