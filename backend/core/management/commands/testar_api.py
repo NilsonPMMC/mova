@@ -1,10 +1,10 @@
 """
-Comando de teste para busca vetorial usando OpenAI API.
+Comando de teste para busca vetorial usando o Gabinete AI Kernel.
 Testa a geração de embeddings e busca por similaridade.
 """
 from django.core.management.base import BaseCommand
 from core.models import TesteVetorial
-from core.services.vector_service_api import VectorService
+from core.services.vector_service import VectorService
 from pgvector.django import L2Distance, CosineDistance
 import logging
 
@@ -12,10 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 class Command(BaseCommand):
-    help = 'Testa busca vetorial com embeddings da OpenAI API'
+    help = 'Testa busca vetorial com embeddings do Gabinete AI Kernel'
 
     def handle(self, *args, **options):
-        self.stdout.write(self.style.SUCCESS('🚀 Iniciando teste de busca vetorial com OpenAI API'))
+        self.stdout.write(self.style.SUCCESS('🚀 Iniciando teste de busca vetorial com Gabinete AI Kernel'))
         
         # Inicializar serviço
         try:
