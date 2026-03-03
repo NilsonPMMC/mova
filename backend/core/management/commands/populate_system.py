@@ -39,8 +39,9 @@ LAMP_COORDS = [
     (Decimal('-23.525000'), Decimal('-46.200000')),  # Sudoeste
 ]
 
-# Dimensões do embedding (Google Gemini)
-EMBEDDING_DIMENSIONS = 3072
+# Dimensões do embedding usadas nos vetores mock
+# Calibrado para o modelo 'mxbai-embed-large' (Gabinete AI Kernel), 1024 dimensões.
+EMBEDDING_DIMENSIONS = 1024
 
 NOMES_ESTATICOS = [
     'Maria Silva', 'João Santos', 'Ana Oliveira', 'Pedro Souza', 'Carla Lima',
@@ -61,7 +62,7 @@ class Command(BaseCommand):
 
     def _generate_mock_embedding(self, text=None, seed=None):
         """
-        Gera um vetor mock de 3072 dimensões usando numpy.random.
+        Gera um vetor mock de 1024 dimensões usando numpy.random.
         Se seed for fornecido, usa para gerar vetores similares para textos relacionados.
         """
         if seed is not None:
