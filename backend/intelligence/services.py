@@ -71,7 +71,7 @@ class LLMService:
                 )
                 return None
 
-            url = f"{api_base}/chat/completions"
+            url = f"{settings.AI_KERNEL_URL}/chat"
 
             system_message = """
 Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
