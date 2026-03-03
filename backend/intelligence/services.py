@@ -16,9 +16,14 @@ class LLMService:
     """
     Serviço de triagem automática usando o Gabinete AI Kernel (FastAPI on-premise).
 
-    A API é compatível com o padrão OpenAI:
-    - Endpoint: {AI_KERNEL_URL}/chat/completions
-    - Payload: {"model": settings.AI_KERNEL_CHAT_MODEL, "messages": [...]}
+    Endpoint esperado do Kernel:
+    - {AI_KERNEL_URL}/chat
+    Payload:
+      {
+        "model": settings.AI_KERNEL_CHAT_MODEL,
+        "system_prompt": <prompt de sistema>,
+        "user_prompt": <texto do usuário>
+      }
     """
 
     @staticmethod
@@ -71,7 +76,7 @@ class LLMService:
                 )
                 return None
 
-            url = f"{settings.AI_KERNEL_URL}/chat"
+            url = f"{api_base}/chat"
 
             system_message = """
 Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
@@ -98,11 +103,8 @@ IMPORTANTE:
 
             payload = {
                 "model": model,
-                "messages": [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": text},
-                ],
-                "temperature": 0.3,
+                "system_prompt": system_message,
+                "user_prompt": text,
             }
 
             logger.info(
@@ -124,8 +126,14 @@ IMPORTANTE:
 
             try:
                 data = response.json()
-                ai_response_text = data["choices"][0]["message"]["content"]
-            except (ValueError, KeyError, IndexError, TypeError) as e:
+                ai_response_text = data.get(
+                    "response",
+                    data.get(
+                        "content",
+                        data.get("answer", str(data)),
+                    ),
+                )
+            except (ValueError, TypeError) as e:
                 logger.error(
                     "Resposta inválida do Gabinete AI Kernel na triagem: %s. "
                     "Trecho da resposta: %s",

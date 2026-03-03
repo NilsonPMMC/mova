@@ -15,7 +15,7 @@ class VectorService:
     def get_embedding(self, text: str) -> List[float]:
         try:
             url = f"{self.base_url}/embeddings"
-            payload = {"model": self.model, "input": text.strip()}
+            payload = {"model": self.model, "texts": [text.strip()]}
             response = requests.post(url, json=payload, timeout=15)
             response.raise_for_status()
             
