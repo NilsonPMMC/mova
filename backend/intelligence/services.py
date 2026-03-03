@@ -65,6 +65,17 @@ class LLMService:
         if save_to_db and not manifestation_instance:
             raise ValueError("manifestation_instance é obrigatório quando save_to_db=True")
 
+        # Carrega a lista de categorias válidas diretamente do banco,
+        # para orientar melhor o modelo e evitar nomes inventados.
+        categorias_validas = list(
+            ManifestationCategory.objects.values_list("name", flat=True)
+        )
+        categorias_str = (
+            ", ".join(categorias_validas)
+            if categorias_validas
+            else "Infraestrutura, Iluminação, Saúde, Trânsito, Outros"
+        )
+
         try:
             api_base = getattr(settings, "AI_KERNEL_URL", "").strip().rstrip("/")
             model = getattr(settings, "AI_KERNEL_CHAT_MODEL", "").strip()
