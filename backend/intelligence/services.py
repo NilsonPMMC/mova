@@ -1,9 +1,11 @@
 import json
 import re
 import logging
-import os
+from typing import Any, Dict, Optional
+
+import requests
 from django.conf import settings
-from openai import OpenAI
+from requests import RequestException
 from .models import NLPAnalysis
 from reports.models import ManifestationCategory
 
@@ -12,377 +14,369 @@ logger = logging.getLogger(__name__)
 
 class LLMService:
     """
-    Serviço flexível para análise de manifestações usando LLMs compatíveis com OpenAI API
-    Suporta: OpenAI, Groq, LocalLLM (via OpenAI-compatible API)
+    Serviço de triagem automática usando o Gabinete AI Kernel (FastAPI on-premise).
+
+    A API é compatível com o padrão OpenAI:
+    - Endpoint: {AI_KERNEL_URL}/chat/completions
+    - Payload: {"model": settings.AI_KERNEL_CHAT_MODEL, "messages": [...]}
     """
-    
+
     @staticmethod
-    def extract_json_from_text(text):
+    def _extract_json_with_regex(text: str) -> Optional[Dict[str, Any]]:
         """
-        Extrai JSON de um texto que pode conter markdown ou texto adicional.
-        Útil para modelos verbosos como Llama 3.
-        
-        Args:
-            text: Texto que pode conter JSON
-            
-        Returns:
-            dict: JSON extraído ou None se não encontrar
+        Extrai o primeiro objeto JSON válido de um texto, usando regex,
+        para casos em que o modelo adiciona texto antes/depois do JSON.
         """
-        # Tentar parsear diretamente primeiro
+        # Tentar diretamente primeiro
         try:
             return json.loads(text.strip())
         except json.JSONDecodeError:
             pass
-        
-        # Tentar extrair JSON de markdown code blocks
-        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', text, re.DOTALL)
-        if json_match:
+
+        # Procurar bloco JSON principal com regex
+        match = re.search(r"\{[\s\S]*\}", text)
+        if match:
+            candidate = match.group(0)
             try:
-                return json.loads(json_match.group(1))
+                return json.loads(candidate)
             except json.JSONDecodeError:
-                pass
-        
-        # Tentar encontrar primeiro objeto JSON válido
-        json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', text, re.DOTALL)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
-        
-        # Tentar encontrar qualquer JSON válido no texto
-        start_idx = text.find('{')
-        if start_idx != -1:
-            # Encontrar o último } correspondente
-            brace_count = 0
-            for i in range(start_idx, len(text)):
-                if text[i] == '{':
-                    brace_count += 1
-                elif text[i] == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        try:
-                            return json.loads(text[start_idx:i+1])
-                        except json.JSONDecodeError:
-                            break
-        
+                return None
+
         return None
-    
+
     @staticmethod
-    def analyze_text(text, save_to_db=False, manifestation_instance=None):
+    def analyze_text(text, save_to_db: bool = False, manifestation_instance=None):
         """
-        Analisa um texto usando LLM e retorna os dados estruturados.
-        
+        Analisa um texto usando o Gabinete AI Kernel e retorna dados estruturados.
+
         Args:
             text: Texto a ser analisado
             save_to_db: Se True, salva no banco (requer manifestation_instance)
             manifestation_instance: Instância de Manifestation (obrigatório se save_to_db=True)
-        
+
         Returns:
-            dict: Dados estruturados da análise ou None em caso de erro
+            dict ou NLPAnalysis: Dados estruturados da análise ou None em caso de erro
         """
         if save_to_db and not manifestation_instance:
             raise ValueError("manifestation_instance é obrigatório quando save_to_db=True")
-        
+
         try:
-            # Configurações da API
-            api_key = getattr(settings, 'OPENAI_API_KEY', '')
-            api_base = getattr(settings, 'OPENAI_API_BASE', 'https://api.openai.com/v1')
-            model = getattr(settings, 'LLM_MODEL', 'gpt-4o-mini')
-            
-            if not api_key:
-                logger.warning("OPENAI_API_KEY não configurada. Análise não será executada.")
-                return None
-            
-            # Remover variáveis de ambiente de proxy que podem causar conflito com httpx
-            import httpx
-            env_backup = {}
-            proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy', 'ALL_PROXY', 'all_proxy']
-            for var in proxy_vars:
-                if var in os.environ:
-                    env_backup[var] = os.environ.pop(var)
+            api_base = getattr(settings, "AI_KERNEL_URL", "").strip().rstrip("/")
+            model = getattr(settings, "AI_KERNEL_CHAT_MODEL", "").strip()
 
-            try:
-                # Criar cliente httpx sem proxies (variáveis de ambiente já foram removidas)
-                http_client = httpx.Client(timeout=30.0)
-
-                # Criar cliente OpenAI com cliente HTTP customizado
-                if api_base != 'https://api.openai.com/v1':
-                    client = OpenAI(
-                        api_key=api_key,
-                        base_url=api_base,
-                        http_client=http_client
-                    )
-                else:
-                    client = OpenAI(
-                        api_key=api_key,
-                        http_client=http_client
-                    )
-            finally:
-                # Restaurar variáveis de ambiente de proxy
-                for var, value in env_backup.items():
-                    os.environ[var] = value
-            
-            # Preparar o prompt do sistema
-            system_message = """Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
-
-Retorne APENAS um objeto JSON válido. Não inclua markdown ```json``` ou texto adicional.
-
-O JSON deve conter exatamente estes campos:
-- sentiment_score: float entre -1.0 (muito negativo/raiva) e 1.0 (positivo/elogio)
-- urgency_level: int de 1 (pouco urgente) a 5 (crítico/risco de vida)
-- intent: string com uma destas opções EXATAS:
-  * "COMPLAINT" (Reclamação - problema que precisa ser resolvido)
-  * "SUGGESTION" (Sugestão - ideia ou melhoria proposta)
-  * "INFORMATION" (Dúvida/Informação - pergunta ou busca de informação)
-  * "DENUNCIATION" (Denúncia - irregularidade grave)
-- suggested_category: string curta com o nome EXATO de uma destas categorias:
-  * "Iluminação Pública" (para problemas com postes, lâmpadas, luzes piscando/apagadas)
-  * "Buraco em Via/Pavimentação" (para buracos, calçadas, pavimentação)
-  * "Saúde/Falta de Médico" (para problemas em unidades de saúde, falta de médicos)
-  * "Coleta de Lixo" (para problemas com coleta, lixeiras)
-  * "Zeladoria" (para limpeza, capina, poda)
-  * "Trânsito" (para sinalização, semáforos, faixas)
-  * "Segurança" (para problemas de segurança pública)
-  * "Meio Ambiente" (para questões ambientais)
-- summary: string com resumo executivo de uma frase
-- keywords: array de strings com 3 a 5 palavras-chave principais extraídas do texto
-
-IMPORTANTE: 
-- Retorne APENAS o JSON válido, sem explicações, sem markdown.
-- Use o nome EXATO da categoria da lista acima.
-- Para problemas com "poste", "luz", "lâmpada", "iluminação", "piscando", "apagando", "acendendo" → use "Iluminação Pública".
-- Para problemas com "buraco", "rua", "calçada", "pavimentação" → use "Buraco em Via/Pavimentação".
-- Para dúvidas, perguntas como "onde", "como", "quando", "qual" → use "INFORMATION".
-- Para reclamações sobre problemas → use "COMPLAINT".
-- Para sugestões de melhoria → use "SUGGESTION".
-- Para denúncias de irregularidades graves → use "DENUNCIATION"."""
-            
-            # Preparar o prompt do usuário com o relato
-            user_message = text
-            
-            # Chamar a API do LLM
-            logger.info(
-                f"Iniciando análise de IA para texto "
-                f"(Modelo: {model}, Base: {api_base})"
-            )
-            
-            # Preparar parâmetros da chamada
-            call_params = {
-                'model': model,
-                'messages': [
-                    {"role": "system", "content": system_message},
-                    {"role": "user", "content": user_message}
-                ],
-                'temperature': 0.3,  # Baixa temperatura para respostas mais consistentes
-            }
-            
-            # Tentar usar response_format se suportado (OpenAI, Groq suportam)
-            # Alguns modelos locais podem não suportar, então fazemos try/except
-            try:
-                call_params['response_format'] = {"type": "json_object"}
-                response = client.chat.completions.create(**call_params)
-            except Exception as e:
-                # Se não suportar response_format, tentar sem ele
-                logger.debug(f"response_format não suportado, tentando sem ele: {e}")
-                call_params.pop('response_format', None)
-                response = client.chat.completions.create(**call_params)
-            
-            # Extrair a resposta
-            ai_response_text = response.choices[0].message.content
-            
-            # Parsear o JSON retornado (com tratamento para modelos verbosos)
-            ai_data = LLMService.extract_json_from_text(ai_response_text)
-            
-            if not ai_data:
-                logger.error(
-                    f"Erro ao extrair JSON da resposta do LLM. "
-                    f"Resposta recebida: {ai_response_text[:500]}"
+            if not api_base or not model:
+                logger.warning(
+                    "AI_KERNEL_URL ou AI_KERNEL_CHAT_MODEL não configurados. "
+                    "Análise não será executada."
                 )
                 return None
-            
-            # Extrair os dados estruturados
-            sentiment_score = float(ai_data.get('sentiment_score', 0.0))
-            urgency_level = int(ai_data.get('urgency_level', 3))
-            intent = ai_data.get('intent', 'COMPLAINT')
-            suggested_category_name = ai_data.get('suggested_category', '')
-            summary = ai_data.get('summary', '')
-            keywords = ai_data.get('keywords', [])
-            
-            # Validar intent
-            valid_intents = ['COMPLAINT', 'SUGGESTION', 'INFORMATION', 'DENUNCIATION']
+
+            url = f"{api_base}/chat/completions"
+
+            system_message = """
+Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
+
+Retorne APENAS um objeto JSON válido, sem markdown, sem texto antes ou depois.
+
+O JSON DEVE conter OBRIGATORIAMENTE estas chaves:
+- category: string com o nome da categoria sugerida (ex.: "Iluminação Pública", "Buraco em Via/Pavimentação")
+- urgency_level: inteiro de 1 (pouco urgente) a 5 (crítico/risco de vida)
+- sentiment: float entre -1.0 (muito negativo/raiva) e 1.0 (positivo/elogio)
+
+Você PODE opcionalmente incluir:
+- summary: string com um resumo executivo em UMA frase
+- keywords: array de 3 a 5 palavras-chave importantes do texto
+
+Regras importantes:
+- category deve usar nomes claros, compatíveis com categorias de Ouvidoria (ex.: "Iluminação Pública", "Buraco em Via/Pavimentação", "Saúde/Falta de Médico", "Coleta de Lixo", "Zeladoria", "Trânsito", "Segurança", "Meio Ambiente").
+- urgency_level = 5 para risco de vida ou emergências graves; 1 para casos de baixa prioridade.
+- sentiment negativo (perto de -1.0) para reclamações fortes/raiva, neutro (~0.0) para dúvidas, positivo (>0.0) para elogios.
+
+IMPORTANTE:
+- Responda APENAS com o JSON. NÃO inclua comentários, markdown ou texto solto.
+"""
+
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {"role": "user", "content": text},
+                ],
+                "temperature": 0.3,
+            }
+
+            logger.info(
+                "Iniciando análise de IA via Gabinete AI Kernel (model=%s, base=%s)",
+                model,
+                api_base,
+            )
+
+            try:
+                response = requests.post(url, json=payload, timeout=60)
+                response.raise_for_status()
+            except RequestException as e:
+                logger.error(
+                    "Erro de rede ao chamar o Gabinete AI Kernel para triagem: %s",
+                    e,
+                    exc_info=True,
+                )
+                return None
+
+            try:
+                data = response.json()
+                ai_response_text = data["choices"][0]["message"]["content"]
+            except (ValueError, KeyError, IndexError, TypeError) as e:
+                logger.error(
+                    "Resposta inválida do Gabinete AI Kernel na triagem: %s. "
+                    "Trecho da resposta: %s",
+                    e,
+                    response.text[:500],
+                )
+                return None
+
+            ai_data = LLMService._extract_json_with_regex(ai_response_text)
+
+            if not ai_data:
+                logger.error(
+                    "Erro ao extrair JSON da resposta do LLM. Resposta recebida: %s",
+                    ai_response_text[:500],
+                )
+                return None
+
+            # Mapear novas chaves obrigatórias (category, urgency_level, sentiment)
+            sentiment_score = float(
+                ai_data.get("sentiment", ai_data.get("sentiment_score", 0.0))
+            )
+            urgency_level = int(ai_data.get("urgency_level", 3))
+            suggested_category_name = ai_data.get(
+                "category", ai_data.get("suggested_category", "")
+            )
+
+            # Campos opcionais/legados
+            summary = ai_data.get("summary", "")
+            keywords = ai_data.get("keywords", [])
+            intent = ai_data.get("intent", "COMPLAINT")
+
+            # Sanitização básica
+            valid_intents = ["COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION"]
             if intent not in valid_intents:
-                intent = 'COMPLAINT'  # Default seguro
-            
-            # Garantir que keywords é uma lista
+                intent = "COMPLAINT"
+
             if not isinstance(keywords, list):
                 keywords = []
-            
-            # Validar ranges
-            sentiment_score = max(-1.0, min(1.0, sentiment_score))  # Clamp entre -1 e 1
-            urgency_level = max(1, min(5, urgency_level))  # Clamp entre 1 e 5
-            
-            # Tentar encontrar categoria sugerida no banco
+
+            sentiment_score = max(-1.0, min(1.0, sentiment_score))
+            urgency_level = max(1, min(5, urgency_level))
+
+            # Resolver categoria no banco
             suggested_category = None
             if suggested_category_name:
-                # Limpar o nome da categoria (remover espaços extras, etc)
                 suggested_category_name = suggested_category_name.strip()
-                
-                # Mapeamento de sinônimos para categorias
+
                 category_mapping = {
-                    'iluminação pública': 'Iluminação Pública',
-                    'iluminacao publica': 'Iluminação Pública',
-                    'luz': 'Iluminação Pública',
-                    'poste': 'Iluminação Pública',
-                    'lâmpada': 'Iluminação Pública',
-                    'lampada': 'Iluminação Pública',
-                    'buraco': 'Buraco em Via/Pavimentação',
-                    'pavimentação': 'Buraco em Via/Pavimentação',
-                    'pavimentacao': 'Buraco em Via/Pavimentação',
-                    'rua': 'Buraco em Via/Pavimentação',
-                    'calçada': 'Buraco em Via/Pavimentação',
-                    'calcada': 'Buraco em Via/Pavimentação',
-                    'saúde': 'Saúde/Falta de Médico',
-                    'saude': 'Saúde/Falta de Médico',
-                    'médico': 'Saúde/Falta de Médico',
-                    'medico': 'Saúde/Falta de Médico',
-                    'lixo': 'Coleta de Lixo',
-                    'coleta': 'Coleta de Lixo',
+                    "iluminação pública": "Iluminação Pública",
+                    "iluminacao publica": "Iluminação Pública",
+                    "luz": "Iluminação Pública",
+                    "poste": "Iluminação Pública",
+                    "lâmpada": "Iluminação Pública",
+                    "lampada": "Iluminação Pública",
+                    "buraco": "Buraco em Via/Pavimentação",
+                    "pavimentação": "Buraco em Via/Pavimentação",
+                    "pavimentacao": "Buraco em Via/Pavimentação",
+                    "rua": "Buraco em Via/Pavimentação",
+                    "calçada": "Buraco em Via/Pavimentação",
+                    "calcada": "Buraco em Via/Pavimentação",
+                    "saúde": "Saúde/Falta de Médico",
+                    "saude": "Saúde/Falta de Médico",
+                    "médico": "Saúde/Falta de Médico",
+                    "medico": "Saúde/Falta de Médico",
+                    "lixo": "Coleta de Lixo",
+                    "coleta": "Coleta de Lixo",
                 }
-                
-                # Normalizar nome sugerido
+
                 suggested_normalized = suggested_category_name.lower().strip()
-                
-                # Verificar mapeamento
                 if suggested_normalized in category_mapping:
                     suggested_category_name = category_mapping[suggested_normalized]
-                
-                # Buscar categoria por nome exato primeiro (case-insensitive)
+
                 suggested_category = ManifestationCategory.objects.filter(
                     name__iexact=suggested_category_name,
-                    is_active=True
+                    is_active=True,
                 ).first()
-                
-                # Se não encontrar, buscar por nome parcial
+
                 if not suggested_category:
                     suggested_category = ManifestationCategory.objects.filter(
                         name__icontains=suggested_category_name,
-                        is_active=True
+                        is_active=True,
                     ).first()
-                
-                # Se ainda não encontrar, tentar buscar por palavras-chave
+
                 if not suggested_category:
                     for category in ManifestationCategory.objects.filter(is_active=True):
                         category_name_lower = category.name.lower()
-                        # Verificar se alguma palavra-chave está no nome da categoria
                         if any(keyword.lower() in category_name_lower for keyword in keywords):
                             suggested_category = category
                             break
-                        # Verificar se o nome sugerido está no nome da categoria
                         if suggested_category_name.lower() in category_name_lower:
                             suggested_category = category
                             break
-                
-                # Busca inteligente por palavras-chave específicas na descrição também
+
                 if not suggested_category:
                     keywords_lower = [k.lower() for k in keywords] if keywords else []
                     description_lower = text.lower()
-                    
-                    # Verificar palavras-chave relacionadas a iluminação
-                    iluminacao_keywords = ['poste', 'luz', 'lâmpada', 'lampada', 'iluminação', 'iluminacao', 'piscando', 'apagando', 'acendendo', 'apagada', 'queimada', 'luminária']
-                    if any(kw in keywords_lower for kw in iluminacao_keywords) or \
-                       any(kw in description_lower for kw in iluminacao_keywords):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Iluminação').first()
-                    # Verificar palavras-chave relacionadas a buraco/pavimentação
-                    elif any(kw in ['buraco', 'rua', 'calçada', 'calcada', 'pavimentação', 'pavimentacao', 'asfalto'] for kw in keywords_lower) or \
-                         any(kw in description_lower for kw in ['buraco', 'rua', 'calçada', 'calcada', 'pavimentação', 'pavimentacao']):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Pavimentação').first()
-                    # Verificar palavras-chave relacionadas a lixo
-                    elif any(kw in ['lixo', 'coleta', 'lixeira', 'lixeiro'] for kw in keywords_lower) or \
-                         any(kw in description_lower for kw in ['lixo', 'coleta', 'lixeira']):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Lixo').first()
-                    # Verificar palavras-chave relacionadas a saúde
-                    elif any(kw in ['saúde', 'saude', 'médico', 'medico', 'hospital', 'posto', 'unidade'] for kw in keywords_lower) or \
-                         any(kw in description_lower for kw in ['saúde', 'saude', 'médico', 'medico', 'hospital']):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Saúde').first()
-            
-            # Preparar dados de uso (pode não estar disponível em todos os provedores)
-            usage_data = {}
-            if hasattr(response, 'usage') and response.usage:
-                usage_data = {
-                    'prompt_tokens': getattr(response.usage, 'prompt_tokens', 0),
-                    'completion_tokens': getattr(response.usage, 'completion_tokens', 0),
-                    'total_tokens': getattr(response.usage, 'total_tokens', 0),
-                }
-            
-            # Preparar resultado
+
+                    iluminacao_keywords = [
+                        "poste",
+                        "luz",
+                        "lâmpada",
+                        "lampada",
+                        "iluminação",
+                        "iluminacao",
+                        "piscando",
+                        "apagando",
+                        "acendendo",
+                        "apagada",
+                        "queimada",
+                        "luminária",
+                    ]
+                    if any(kw in keywords_lower for kw in iluminacao_keywords) or any(
+                        kw in description_lower for kw in iluminacao_keywords
+                    ):
+                        suggested_category = ManifestationCategory.objects.filter(
+                            name__icontains="Iluminação"
+                        ).first()
+                    elif any(
+                        kw
+                        in [
+                            "buraco",
+                            "rua",
+                            "calçada",
+                            "calcada",
+                            "pavimentação",
+                            "pavimentacao",
+                            "asfalto",
+                        ]
+                        for kw in keywords_lower
+                    ) or any(
+                        kw
+                        in description_lower
+                        for kw in [
+                            "buraco",
+                            "rua",
+                            "calçada",
+                            "calcada",
+                            "pavimentação",
+                            "pavimentacao",
+                        ]
+                    ):
+                        suggested_category = ManifestationCategory.objects.filter(
+                            name__icontains="Pavimentação"
+                        ).first()
+                    elif any(
+                        kw in ["lixo", "coleta", "lixeira", "lixeiro"] for kw in keywords_lower
+                    ) or any(
+                        kw in description_lower for kw in ["lixo", "coleta", "lixeira"]
+                    ):
+                        suggested_category = ManifestationCategory.objects.filter(
+                            name__icontains="Lixo"
+                        ).first()
+                    elif any(
+                        kw
+                        in [
+                            "saúde",
+                            "saude",
+                            "médico",
+                            "medico",
+                            "hospital",
+                            "posto",
+                            "unidade",
+                        ]
+                        for kw in keywords_lower
+                    ) or any(
+                        kw
+                        in description_lower
+                        for kw in ["saúde", "saude", "médico", "medico", "hospital"]
+                    ):
+                        suggested_category = ManifestationCategory.objects.filter(
+                            name__icontains="Saúde"
+                        ).first()
+
+            usage_data: Dict[str, Any] = {}
+
             result = {
-                'sentiment_score': sentiment_score,
-                'urgency_level': urgency_level,
-                'intent': intent,
-                'suggested_category': suggested_category,
-                'suggested_category_name': suggested_category.name if suggested_category else suggested_category_name,
-                'keywords': keywords,
-                'summary': summary,
-                'raw_ai_response': {
-                    'model': response.model,
-                    'api_base': api_base,
-                    'usage': usage_data,
-                    'response_text': ai_response_text,
-                    'parsed_json': ai_data,
-                }
+                "sentiment_score": sentiment_score,
+                "urgency_level": urgency_level,
+                "intent": intent,
+                "suggested_category": suggested_category,
+                "suggested_category_name": (
+                    suggested_category.name if suggested_category else suggested_category_name
+                ),
+                "keywords": keywords,
+                "summary": summary,
+                "raw_ai_response": {
+                    "model": data.get("model", model),
+                    "api_base": api_base,
+                    "usage": usage_data,
+                    "response_text": ai_response_text,
+                    "parsed_json": ai_data,
+                },
             }
-            
-            # Se deve salvar no banco
+
             if save_to_db and manifestation_instance:
                 nlp_analysis, created = NLPAnalysis.objects.update_or_create(
                     manifestation=manifestation_instance,
                     defaults={
-                        'sentiment_score': sentiment_score,
-                        'urgency_level': urgency_level,
-                        'intent': intent,
-                        'suggested_category': suggested_category,
-                        'keywords': keywords,
-                        'summary': summary,
-                        'raw_ai_response': {
-                            'model': response.model,
-                            'api_base': api_base,
-                            'usage': usage_data,
-                            'response_text': ai_response_text,
-                            'parsed_json': ai_data,
-                            'full_response': {
-                                'id': getattr(response, 'id', None),
-                                'created': getattr(response, 'created', None),
-                                'model': response.model,
-                            }
+                        "sentiment_score": sentiment_score,
+                        "urgency_level": urgency_level,
+                        "intent": intent,
+                        "suggested_category": suggested_category,
+                        "keywords": keywords,
+                        "summary": summary,
+                        "raw_ai_response": {
+                            "model": data.get("model", model),
+                            "api_base": api_base,
+                            "usage": usage_data,
+                            "response_text": ai_response_text,
+                            "parsed_json": ai_data,
+                            "full_response": {
+                                "id": data.get("id"),
+                                "created": data.get("created"),
+                                "model": data.get("model", model),
+                            },
                         },
-                        'ai_model_used': response.model,
-                        'analysis_version': getattr(settings, 'NLP_ANALYSIS_VERSION', '1.0'),
-                    }
+                        "ai_model_used": data.get("model", model),
+                        "analysis_version": getattr(
+                            settings, "NLP_ANALYSIS_VERSION", "1.0"
+                        ),
+                    },
                 )
-                
+
                 logger.info(
-                    f"Análise de IA concluída para manifestação {manifestation_instance.protocol}. "
-                    f"Sentimento: {sentiment_score:.2f}, Urgência: {urgency_level}, "
-                    f"Intenção: {intent}, Categoria sugerida: {suggested_category_name}"
+                    "Análise de IA concluída para manifestação %s. "
+                    "Sentimento: %.2f, Urgência: %s, Categoria sugerida: %s",
+                    manifestation_instance.protocol,
+                    sentiment_score,
+                    urgency_level,
+                    suggested_category_name,
                 )
                 from intelligence.router import route_manifestation
+
                 route_manifestation(manifestation_instance)
                 return nlp_analysis
-            else:
-                logger.info(
-                    f"Análise de IA concluída (rascunho). "
-                    f"Sentimento: {sentiment_score:.2f}, Urgência: {urgency_level}, "
-                    f"Intenção: {intent}, Categoria sugerida: {suggested_category_name}"
-                )
-                
-                return result
-            
+
+            logger.info(
+                "Análise de IA concluída (rascunho). "
+                "Sentimento: %.2f, Urgência: %s, Categoria sugerida: %s",
+                sentiment_score,
+                urgency_level,
+                suggested_category_name,
+            )
+
+            return result
+
         except Exception as e:
-            # Log do erro sem quebrar o sistema
             logger.error(
-                f"Erro ao analisar texto com LLM: {str(e)}",
-                exc_info=True
+                "Erro ao analisar texto com LLM (Gabinete AI Kernel): %s",
+                e,
+                exc_info=True,
             )
             return None
 
