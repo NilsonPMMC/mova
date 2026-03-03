@@ -324,18 +324,18 @@ IMPORTANTE:
                         "keywords": keywords,
                         "summary": summary,
                         "raw_ai_response": {
-                            "model": data.get("model", model),
+                            "model": model,
                             "api_base": api_base,
                             "usage": usage_data,
                             "response_text": ai_response_text,
                             "parsed_json": ai_data,
                             "full_response": {
-                                "id": data.get("id"),
-                                "created": data.get("created"),
-                                "model": data.get("model", model),
+                                "id": None,
+                                "created": None,
+                                "model": model,
                             },
                         },
-                        "ai_model_used": data.get("model", model),
+                        "ai_model_used": model,
                         "analysis_version": getattr(
                             settings, "NLP_ANALYSIS_VERSION", "1.0"
                         ),
