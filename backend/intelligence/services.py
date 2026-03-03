@@ -172,136 +172,82 @@ IMPORTANTE:
             sentiment_score = max(-1.0, min(1.0, sentiment_score))
             urgency_level = max(1, min(5, urgency_level))
 
-            # Resolver categoria no banco
+            # Resolver categoria no banco com fallback semântico
             suggested_category = None
-            if suggested_category_name:
-                suggested_category_name = suggested_category_name.strip()
+            cat_name = (suggested_category_name or "").strip()
+            category_obj = None
 
-                category_mapping = {
-                    "iluminação pública": "Iluminação Pública",
-                    "iluminacao publica": "Iluminação Pública",
-                    "luz": "Iluminação Pública",
-                    "poste": "Iluminação Pública",
-                    "lâmpada": "Iluminação Pública",
-                    "lampada": "Iluminação Pública",
-                    "buraco": "Buraco em Via/Pavimentação",
-                    "pavimentação": "Buraco em Via/Pavimentação",
-                    "pavimentacao": "Buraco em Via/Pavimentação",
-                    "rua": "Buraco em Via/Pavimentação",
-                    "calçada": "Buraco em Via/Pavimentação",
-                    "calcada": "Buraco em Via/Pavimentação",
-                    "saúde": "Saúde/Falta de Médico",
-                    "saude": "Saúde/Falta de Médico",
-                    "médico": "Saúde/Falta de Médico",
-                    "medico": "Saúde/Falta de Médico",
-                    "lixo": "Coleta de Lixo",
-                    "coleta": "Coleta de Lixo",
-                }
-
-                suggested_normalized = suggested_category_name.lower().strip()
-                if suggested_normalized in category_mapping:
-                    suggested_category_name = category_mapping[suggested_normalized]
-
-                suggested_category = ManifestationCategory.objects.filter(
-                    name__iexact=suggested_category_name,
-                    is_active=True,
+            if cat_name:
+                # 1. Tentativa exata
+                category_obj = ManifestationCategory.objects.filter(
+                    name__iexact=cat_name, is_active=True
                 ).first()
 
-                if not suggested_category:
-                    suggested_category = ManifestationCategory.objects.filter(
-                        name__icontains=suggested_category_name,
-                        is_active=True,
+                # 2. Fallback semântico tratando a teimosia do Llama 3.x
+                if not category_obj:
+                    cat_lower = cat_name.lower()
+                    text_lower = text.lower()
+
+                    if any(
+                        word in cat_lower or word in text_lower
+                        for word in [
+                            "buraco",
+                            "asfalto",
+                            "via",
+                            "pavimentação",
+                            "calçada",
+                            "bueiro",
+                            "rua",
+                        ]
+                    ):
+                        category_obj = ManifestationCategory.objects.filter(
+                            name__icontains="Infraestrutura", is_active=True
+                        ).first()
+                    elif any(
+                        word in cat_lower or word in text_lower
+                        for word in ["luz", "poste", "lâmpada", "escuro", "iluminação"]
+                    ):
+                        category_obj = ManifestationCategory.objects.filter(
+                            name__icontains="Iluminação", is_active=True
+                        ).first()
+                    elif any(
+                        word in cat_lower or word in text_lower
+                        for word in [
+                            "médico",
+                            "remédio",
+                            "posto",
+                            "hospital",
+                            "saúde",
+                            "ubs",
+                        ]
+                    ):
+                        category_obj = ManifestationCategory.objects.filter(
+                            name__icontains="Saúde", is_active=True
+                        ).first()
+                    elif any(
+                        word in cat_lower or word in text_lower
+                        for word in [
+                            "trânsito",
+                            "carro",
+                            "sinal",
+                            "semáforo",
+                            "multa",
+                            "acidente",
+                        ]
+                    ):
+                        category_obj = ManifestationCategory.objects.filter(
+                            name__icontains="Trânsito", is_active=True
+                        ).first()
+
+                # 3. Fallback final: se não bater em nada, direciona para "Outros"
+                if not category_obj:
+                    category_obj = ManifestationCategory.objects.filter(
+                        name__icontains="Outros", is_active=True
                     ).first()
 
-                if not suggested_category:
-                    for category in ManifestationCategory.objects.filter(is_active=True):
-                        category_name_lower = category.name.lower()
-                        if any(keyword.lower() in category_name_lower for keyword in keywords):
-                            suggested_category = category
-                            break
-                        if suggested_category_name.lower() in category_name_lower:
-                            suggested_category = category
-                            break
-
-                if not suggested_category:
-                    keywords_lower = [k.lower() for k in keywords] if keywords else []
-                    description_lower = text.lower()
-
-                    iluminacao_keywords = [
-                        "poste",
-                        "luz",
-                        "lâmpada",
-                        "lampada",
-                        "iluminação",
-                        "iluminacao",
-                        "piscando",
-                        "apagando",
-                        "acendendo",
-                        "apagada",
-                        "queimada",
-                        "luminária",
-                    ]
-                    if any(kw in keywords_lower for kw in iluminacao_keywords) or any(
-                        kw in description_lower for kw in iluminacao_keywords
-                    ):
-                        suggested_category = ManifestationCategory.objects.filter(
-                            name__icontains="Iluminação"
-                        ).first()
-                    elif any(
-                        kw
-                        in [
-                            "buraco",
-                            "rua",
-                            "calçada",
-                            "calcada",
-                            "pavimentação",
-                            "pavimentacao",
-                            "asfalto",
-                        ]
-                        for kw in keywords_lower
-                    ) or any(
-                        kw
-                        in description_lower
-                        for kw in [
-                            "buraco",
-                            "rua",
-                            "calçada",
-                            "calcada",
-                            "pavimentação",
-                            "pavimentacao",
-                        ]
-                    ):
-                        suggested_category = ManifestationCategory.objects.filter(
-                            name__icontains="Pavimentação"
-                        ).first()
-                    elif any(
-                        kw in ["lixo", "coleta", "lixeira", "lixeiro"] for kw in keywords_lower
-                    ) or any(
-                        kw in description_lower for kw in ["lixo", "coleta", "lixeira"]
-                    ):
-                        suggested_category = ManifestationCategory.objects.filter(
-                            name__icontains="Lixo"
-                        ).first()
-                    elif any(
-                        kw
-                        in [
-                            "saúde",
-                            "saude",
-                            "médico",
-                            "medico",
-                            "hospital",
-                            "posto",
-                            "unidade",
-                        ]
-                        for kw in keywords_lower
-                    ) or any(
-                        kw
-                        in description_lower
-                        for kw in ["saúde", "saude", "médico", "medico", "hospital"]
-                    ):
-                        suggested_category = ManifestationCategory.objects.filter(
-                            name__icontains="Saúde"
-                        ).first()
+            suggested_category = category_obj
+            if suggested_category is not None:
+                suggested_category_name = suggested_category.name
 
             usage_data: Dict[str, Any] = {}
 
