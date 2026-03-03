@@ -124,23 +124,8 @@ IMPORTANTE:
                 )
                 return None
 
-            try:
-                data = response.json()
-                ai_response_text = data.get(
-                    "response",
-                    data.get(
-                        "content",
-                        data.get("answer", str(data)),
-                    ),
-                )
-            except (ValueError, TypeError) as e:
-                logger.error(
-                    "Resposta inválida do Gabinete AI Kernel na triagem: %s. "
-                    "Trecho da resposta: %s",
-                    e,
-                    response.text[:500],
-                )
-                return None
+            # Endpoint /v1/chat do Gabinete AI Kernel retorna diretamente uma string JSON.
+            ai_response_text = response.json()
 
             ai_data = LLMService._extract_json_with_regex(ai_response_text)
 
