@@ -419,12 +419,13 @@ class DeduplicationService:
     Serviço de detecção de duplicidade híbrida (geográfica + semântica).
     Identifica manifestações abertas que sejam simultaneamente:
     - Fisicamente próximas (box geográfico de ~100m)
-    - Semanticamente idênticas (busca vetorial com threshold L2 < 0.35)
+    - Semanticamente idênticas (busca vetorial com threshold L2 / distância vetorial)
     
     Não agrupa automaticamente; apenas sugere e persiste em potential_duplicate.
     """
-    # Threshold de distância L2 para considerar duplicata semântica
-    DUPLICITY_THRESHOLD = 0.35
+    # Threshold de similaridade calibrado para o modelo 'mxbai-embed-large' (1024d)
+    # em textos curtos de ouvidoria, equivalente a ~74% de similaridade (Cosine Distance ~0.26).
+    DUPLICITY_THRESHOLD = 0.26
     
     # Margem geográfica para pré-filtro (aproximadamente 100 metros)
     GEOGRAPHIC_MARGIN = 0.001  # graus (~111 metros)
