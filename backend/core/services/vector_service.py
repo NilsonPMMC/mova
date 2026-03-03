@@ -20,7 +20,7 @@ class VectorService:
             response.raise_for_status()
             
             data = response.json()
-            embedding = data['data'][0]['embedding']
+            embedding = data['embeddings'][0]
             
             if len(embedding) != 1024:
                 logger.warning(f"Dimensão inesperada: {len(embedding)}. Esperado: 1024")
