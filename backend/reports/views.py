@@ -718,6 +718,8 @@ class ManifestationViewSet(viewsets.ModelViewSet):
             'intent_label': dict(NLPAnalysis.INTENT_CHOICES).get(analysis_result.get('intent', 'COMPLAINT'), 'Reclamação'),
             'suggested_category': None,
             'suggested_category_name': analysis_result.get('suggested_category_name', ''),
+            'category': analysis_result.get('category', ''),
+            'category_detail': analysis_result.get('category_detail', ''),
             'urgency_level': analysis_result.get('urgency_level', 3),
             'urgency_label': {
                 1: 'Muito Baixa',

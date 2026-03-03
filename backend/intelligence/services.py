@@ -89,18 +89,19 @@ class LLMService:
 
             url = f"{api_base}/chat"
 
-            system_message = """
+            system_message = f"""
 Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
 
 Responda APENAS com um JSON válido, sem markdown, sem texto antes ou depois, contendo EXATAMENTE as seguintes chaves:
-- 'category': nome da categoria sugerida, usando APENAS categorias oficiais de Ouvidoria já definidas (ex.: "Iluminação Pública", "Infraestrutura", "Saúde/Falta de Médico", "Coleta de Lixo", "Zeladoria", "Trânsito", "Segurança", "Meio Ambiente", "Outros"). NÃO INVENTE NOMES NOVOS.
+- 'macro_category': nome da macro-categoria de Ouvidoria, usando APENAS um destes valores: [{categorias_str}]. NÃO INVENTE NOMES NOVOS.
+- 'category_detail': serviço ou problema específico em 1 a 3 palavras (ex.: "Tapa-buraco", "Troca de Lâmpada", "Falta de Médico").
 - 'urgency_level': inteiro de 1 a 5. USE ESTA RÉGUA: 1 = Dúvida/Informação; 2 = Serviço de rotina; 3 = Incômodo/Demora (ex.: buracos, lâmpadas queimadas, mato alto); 4 = Risco material (risco de dano a patrimônio); 5 = Risco IMINENTE à vida ou desastre. Um buraco comum é NO MÁXIMO nível 3, a menos que haja relato explícito de acidente grave ou risco imediato à vida.
 - 'sentiment': float entre -1.0 e 1.0. Use -1.0 APENAS para xingamentos ou fúria extrema; neutro (~0.0) para dúvidas; positivo (>0.0) para elogios.
 - 'summary': resumo de 5 a 10 palavras sobre o caso. É PROIBIDO deixar vazio.
 - 'keywords': lista com 3 a 5 palavras cruciais do texto (ex.: ["buraco", "avenida", "trânsito"]). É PROIBIDO deixar vazio.
 
 Regras importantes:
-- category deve usar nomes claros, compatíveis com categorias de Ouvidoria (ex.: "Iluminação Pública", "Infraestrutura", "Saúde/Falta de Médico", "Coleta de Lixo", "Zeladoria", "Trânsito", "Segurança", "Meio Ambiente", "Outros").
+- 'macro_category' deve usar nomes claros, compatíveis com categorias de Ouvidoria (ex.: {categorias_str}).
 
 IMPORTANTE:
 - Retorne APENAS o JSON. NÃO inclua comentários, markdown ou texto solto.
@@ -141,14 +142,15 @@ IMPORTANTE:
                 )
                 return None
 
-            # Mapear novas chaves obrigatórias (category, urgency_level, sentiment)
+            # Mapear novas chaves obrigatórias (macro_category, urgency_level, sentiment)
             sentiment_score = float(
                 ai_data.get("sentiment", ai_data.get("sentiment_score", 0.0))
             )
             urgency_level = int(ai_data.get("urgency_level", 3))
-            suggested_category_name = ai_data.get(
+            macro_category = ai_data.get("macro_category") or ai_data.get(
                 "category", ai_data.get("suggested_category", "")
             )
+            category_detail = ai_data.get("category_detail", "")
 
             # Campos opcionais/legados
             summary = ai_data.get("summary", "")
@@ -168,6 +170,7 @@ IMPORTANTE:
 
             # Resolver categoria no banco com fallback semântico
             suggested_category = None
+            suggested_category_name = macro_category or ""
             cat_name = (suggested_category_name or "").strip()
             category_obj = None
 
@@ -249,6 +252,8 @@ IMPORTANTE:
                 "sentiment_score": sentiment_score,
                 "urgency_level": urgency_level,
                 "intent": intent,
+                "category": suggested_category_name,
+                "category_detail": category_detail,
                 "suggested_category": suggested_category,
                 "suggested_category_name": (
                     suggested_category.name if suggested_category else suggested_category_name
@@ -292,6 +297,11 @@ IMPORTANTE:
                         ),
                     },
                 )
+
+                # Preencher detalhe de categoria na manifestação, se o modelo tiver retornado
+                if category_detail and hasattr(manifestation_instance, "category_detail"):
+                    manifestation_instance.category_detail = category_detail
+                    manifestation_instance.save(update_fields=["category_detail"])
 
                 logger.info(
                     "Análise de IA concluída para manifestação %s. "
