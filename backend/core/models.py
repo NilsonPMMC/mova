@@ -58,12 +58,12 @@ class User(AbstractUser):
 
 class TesteVetorial(models.Model):
     """
-    Modelo de teste para busca vetorial com pgvector usando embeddings do Google Gemini API.
-    Usa 3072 dimensões (dimensão retornada pelo modelo models/gemini-embedding-001).
+    Modelo de teste para busca vetorial com pgvector usando embeddings do Gabinete AI Kernel.
+    Usa 1024 dimensões (mxbai-embed-large).
     O campo embedding é gerado automaticamente via signal quando o registro é salvo.
     """
     nome = models.CharField(max_length=200, verbose_name='Nome')
-    embedding = VectorField(dimensions=3072, null=True, blank=True, verbose_name='Embedding Vetorial', help_text='Gerado automaticamente via signal')
+    embedding = VectorField(dimensions=1024, null=True, blank=True, verbose_name='Embedding Vetorial', help_text='Gerado automaticamente via signal')
 
     class Meta:
         db_table = 'teste_vetorial'

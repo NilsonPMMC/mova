@@ -206,13 +206,13 @@ class Manifestation(TimeStampedModel):
         verbose_name='Ordem de Serviço',
         help_text='OS à qual esta manifestação foi agrupada para execução'
     )
-    # Embedding vetorial para busca semântica
+    # Embedding vetorial para busca semântica (Gabinete AI Kernel: mxbai-embed-large, 1024 dimensões)
     embedding = VectorField(
-        dimensions=3072,
+        dimensions=1024,
         null=True,
         blank=True,
         verbose_name='Embedding Vetorial',
-        help_text='Vetor de embedding gerado automaticamente via signal para busca semântica (3072 dimensões)'
+        help_text='Vetor de embedding gerado automaticamente via signal para busca semântica (1024 dimensões)'
     )
 
     class Meta:
