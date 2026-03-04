@@ -122,41 +122,38 @@ class LLMService:
                 # Restaurar variáveis de ambiente de proxy
                 for var, value in env_backup.items():
                     os.environ[var] = value
+
+            # Carregar categorias válidas diretamente do banco para guiar o LLM
+            categorias_validas = list(
+                ManifestationCategory.objects.filter(is_active=True).values_list('name', flat=True)
+            )
+            categorias_str = (
+                ", ".join(categorias_validas)
+                if categorias_validas
+                else "Infraestrutura, Iluminação, Saúde, Trânsito, Outros"
+            )
             
             # Preparar o prompt do sistema
-            system_message = """Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
+            system_message = f"""Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
 
 Retorne APENAS um objeto JSON válido. Não inclua markdown ```json``` ou texto adicional.
 
 O JSON deve conter exatamente estes campos:
-- sentiment_score: float entre -1.0 (muito negativo/raiva) e 1.0 (positivo/elogio)
-- urgency_level: int de 1 (pouco urgente) a 5 (crítico/risco de vida)
+- macro_category: string com o nome EXATO de uma destas categorias oficiais de Ouvidoria: [{categorias_str}]. Não invente nomes novos.
+- category_detail: string com o serviço ou problema específico em 1 a 3 palavras (ex.: "Tapa-buraco", "Troca de Lâmpada", "Falta de Médico").
+- sentiment_score: float entre -1.0 (muito negativo/raiva) e 1.0 (positivo/elogio). Use -1.0 APENAS para xingamentos ou fúria extrema.
+- urgency_level: int de 1 (pouco urgente) a 5 (crítico/risco de vida). USE ESTA RÉGUA: 1 = Dúvida/Informação; 2 = Serviço de rotina; 3 = Incômodo/Demora (ex.: buracos, lâmpadas queimadas, mato alto); 4 = Risco material (risco de dano a patrimônio); 5 = Risco IMINENTE à vida ou desastre. Um buraco comum é NO MÁXIMO nível 3, a menos que haja relato explícito de acidente grave ou risco imediato à vida.
 - intent: string com uma destas opções EXATAS:
   * "COMPLAINT" (Reclamação - problema que precisa ser resolvido)
   * "SUGGESTION" (Sugestão - ideia ou melhoria proposta)
   * "INFORMATION" (Dúvida/Informação - pergunta ou busca de informação)
   * "DENUNCIATION" (Denúncia - irregularidade grave)
-- suggested_category: string curta com o nome EXATO de uma destas categorias:
-  * "Iluminação Pública" (para problemas com postes, lâmpadas, luzes piscando/apagadas)
-  * "Buraco em Via/Pavimentação" (para buracos, calçadas, pavimentação)
-  * "Saúde/Falta de Médico" (para problemas em unidades de saúde, falta de médicos)
-  * "Coleta de Lixo" (para problemas com coleta, lixeiras)
-  * "Zeladoria" (para limpeza, capina, poda)
-  * "Trânsito" (para sinalização, semáforos, faixas)
-  * "Segurança" (para problemas de segurança pública)
-  * "Meio Ambiente" (para questões ambientais)
-- summary: string com resumo executivo de uma frase
-- keywords: array de strings com 3 a 5 palavras-chave principais extraídas do texto
+- summary: string com resumo executivo de uma frase (5 a 10 palavras). É PROIBIDO deixar vazio.
+- keywords: array de strings com 3 a 5 palavras-chave principais extraídas do texto. É PROIBIDO deixar vazio.
 
 IMPORTANTE: 
 - Retorne APENAS o JSON válido, sem explicações, sem markdown.
-- Use o nome EXATO da categoria da lista acima.
-- Para problemas com "poste", "luz", "lâmpada", "iluminação", "piscando", "apagando", "acendendo" → use "Iluminação Pública".
-- Para problemas com "buraco", "rua", "calçada", "pavimentação" → use "Buraco em Via/Pavimentação".
-- Para dúvidas, perguntas como "onde", "como", "quando", "qual" → use "INFORMATION".
-- Para reclamações sobre problemas → use "COMPLAINT".
-- Para sugestões de melhoria → use "SUGGESTION".
-- Para denúncias de irregularidades graves → use "DENUNCIATION"."""
+- Use o nome EXATO de uma categoria da lista [{categorias_str}] em macro_category."""
             
             # Preparar o prompt do usuário com o relato
             user_message = text
@@ -205,7 +202,8 @@ IMPORTANTE:
             sentiment_score = float(ai_data.get('sentiment_score', 0.0))
             urgency_level = int(ai_data.get('urgency_level', 3))
             intent = ai_data.get('intent', 'COMPLAINT')
-            suggested_category_name = ai_data.get('suggested_category', '')
+            macro_category = ai_data.get('macro_category', '') or ai_data.get('suggested_category', '')
+            category_detail = ai_data.get('category_detail', '')
             summary = ai_data.get('summary', '')
             keywords = ai_data.get('keywords', [])
             
@@ -222,89 +220,14 @@ IMPORTANTE:
             sentiment_score = max(-1.0, min(1.0, sentiment_score))  # Clamp entre -1 e 1
             urgency_level = max(1, min(5, urgency_level))  # Clamp entre 1 e 5
             
-            # Tentar encontrar categoria sugerida no banco
+            # Buscar categoria sugerida no banco de forma direta pela macro_category
             suggested_category = None
+            suggested_category_name = macro_category.strip() if macro_category else ''
             if suggested_category_name:
-                # Limpar o nome da categoria (remover espaços extras, etc)
-                suggested_category_name = suggested_category_name.strip()
-                
-                # Mapeamento de sinônimos para categorias
-                category_mapping = {
-                    'iluminação pública': 'Iluminação Pública',
-                    'iluminacao publica': 'Iluminação Pública',
-                    'luz': 'Iluminação Pública',
-                    'poste': 'Iluminação Pública',
-                    'lâmpada': 'Iluminação Pública',
-                    'lampada': 'Iluminação Pública',
-                    'buraco': 'Buraco em Via/Pavimentação',
-                    'pavimentação': 'Buraco em Via/Pavimentação',
-                    'pavimentacao': 'Buraco em Via/Pavimentação',
-                    'rua': 'Buraco em Via/Pavimentação',
-                    'calçada': 'Buraco em Via/Pavimentação',
-                    'calcada': 'Buraco em Via/Pavimentação',
-                    'saúde': 'Saúde/Falta de Médico',
-                    'saude': 'Saúde/Falta de Médico',
-                    'médico': 'Saúde/Falta de Médico',
-                    'medico': 'Saúde/Falta de Médico',
-                    'lixo': 'Coleta de Lixo',
-                    'coleta': 'Coleta de Lixo',
-                }
-                
-                # Normalizar nome sugerido
-                suggested_normalized = suggested_category_name.lower().strip()
-                
-                # Verificar mapeamento
-                if suggested_normalized in category_mapping:
-                    suggested_category_name = category_mapping[suggested_normalized]
-                
-                # Buscar categoria por nome exato primeiro (case-insensitive)
                 suggested_category = ManifestationCategory.objects.filter(
                     name__iexact=suggested_category_name,
                     is_active=True
                 ).first()
-                
-                # Se não encontrar, buscar por nome parcial
-                if not suggested_category:
-                    suggested_category = ManifestationCategory.objects.filter(
-                        name__icontains=suggested_category_name,
-                        is_active=True
-                    ).first()
-                
-                # Se ainda não encontrar, tentar buscar por palavras-chave
-                if not suggested_category:
-                    for category in ManifestationCategory.objects.filter(is_active=True):
-                        category_name_lower = category.name.lower()
-                        # Verificar se alguma palavra-chave está no nome da categoria
-                        if any(keyword.lower() in category_name_lower for keyword in keywords):
-                            suggested_category = category
-                            break
-                        # Verificar se o nome sugerido está no nome da categoria
-                        if suggested_category_name.lower() in category_name_lower:
-                            suggested_category = category
-                            break
-                
-                # Busca inteligente por palavras-chave específicas na descrição também
-                if not suggested_category:
-                    keywords_lower = [k.lower() for k in keywords] if keywords else []
-                    description_lower = text.lower()
-                    
-                    # Verificar palavras-chave relacionadas a iluminação
-                    iluminacao_keywords = ['poste', 'luz', 'lâmpada', 'lampada', 'iluminação', 'iluminacao', 'piscando', 'apagando', 'acendendo', 'apagada', 'queimada', 'luminária']
-                    if any(kw in keywords_lower for kw in iluminacao_keywords) or \
-                       any(kw in description_lower for kw in iluminacao_keywords):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Iluminação').first()
-                    # Verificar palavras-chave relacionadas a buraco/pavimentação
-                    elif any(kw in ['buraco', 'rua', 'calçada', 'calcada', 'pavimentação', 'pavimentacao', 'asfalto'] for kw in keywords_lower) or \
-                         any(kw in description_lower for kw in ['buraco', 'rua', 'calçada', 'calcada', 'pavimentação', 'pavimentacao']):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Pavimentação').first()
-                    # Verificar palavras-chave relacionadas a lixo
-                    elif any(kw in ['lixo', 'coleta', 'lixeira', 'lixeiro'] for kw in keywords_lower) or \
-                         any(kw in description_lower for kw in ['lixo', 'coleta', 'lixeira']):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Lixo').first()
-                    # Verificar palavras-chave relacionadas a saúde
-                    elif any(kw in ['saúde', 'saude', 'médico', 'medico', 'hospital', 'posto', 'unidade'] for kw in keywords_lower) or \
-                         any(kw in description_lower for kw in ['saúde', 'saude', 'médico', 'medico', 'hospital']):
-                        suggested_category = ManifestationCategory.objects.filter(name__icontains='Saúde').first()
             
             # Preparar dados de uso (pode não estar disponível em todos os provedores)
             usage_data = {}
@@ -320,6 +243,8 @@ IMPORTANTE:
                 'sentiment_score': sentiment_score,
                 'urgency_level': urgency_level,
                 'intent': intent,
+                'category': suggested_category_name,
+                'category_detail': category_detail,
                 'suggested_category': suggested_category,
                 'suggested_category_name': suggested_category.name if suggested_category else suggested_category_name,
                 'keywords': keywords,
@@ -360,7 +285,13 @@ IMPORTANTE:
                         'analysis_version': getattr(settings, 'NLP_ANALYSIS_VERSION', '1.0'),
                     }
                 )
-                
+
+                # Se o modelo retornou um detalhe de categoria e o campo existir na Manifestation,
+                # preenche manifestation.category_detail para uso posterior nos painéis.
+                if category_detail and hasattr(manifestation_instance, "category_detail"):
+                    manifestation_instance.category_detail = category_detail
+                    manifestation_instance.save(update_fields=["category_detail"])
+
                 logger.info(
                     f"Análise de IA concluída para manifestação {manifestation_instance.protocol}. "
                     f"Sentimento: {sentiment_score:.2f}, Urgência: {urgency_level}, "
