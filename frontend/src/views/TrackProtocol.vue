@@ -81,9 +81,15 @@ function handleSearch() {
     error.value = 'Digite um protocolo válido'
     return
   }
-  
+
   error.value = null
-  searchedProtocol.value = protocol
+  isSearching.value = true
+  // Força recriação do componente de timeline ao repetir a busca
+  searchedProtocol.value = null
+  requestAnimationFrame(() => {
+    searchedProtocol.value = protocol
+    isSearching.value = false
+  })
 }
 
 // Se protocolo vier na query, buscar automaticamente

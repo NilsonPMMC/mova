@@ -107,6 +107,7 @@ import { ref, onMounted } from 'vue'
 import { Loader, AlertCircle } from 'lucide-vue-next'
 import ChatBubble from './ChatBubble.vue'
 import apiService from '@/services/api'
+import { useManifestationStore } from '@/stores/manifestation'
 
 const props = defineProps<{
   description: string
@@ -119,6 +120,7 @@ defineEmits<{
   back: []
 }>()
 
+const store = useManifestationStore()
 const isAnalyzing = ref(true)
 const analysisResult = ref<any>(null)
 const analysisError = ref<string | null>(null)
@@ -154,6 +156,7 @@ async function analyzeDraft() {
     })
     
     analysisResult.value = response.data
+    store.setDraftAnalysis(response.data)
   } catch (error: any) {
     console.error('Erro ao analisar rascunho:', error)
     analysisError.value = error.response?.data?.error || 'Erro ao analisar. Tente novamente.'

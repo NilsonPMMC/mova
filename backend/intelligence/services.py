@@ -6,6 +6,7 @@ from django.conf import settings
 from openai import OpenAI
 from .models import NLPAnalysis
 from reports.models import ManifestationCategory
+from core.services.geocoding_service import GeocodingService
 
 logger = logging.getLogger(__name__)
 
@@ -133,27 +134,27 @@ class LLMService:
                 else "Infraestrutura, Iluminação, Saúde, Trânsito, Outros"
             )
             
-            # Preparar o prompt do sistema
-            system_message = f"""Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos.
+            # Preparar o prompt do sistema (múltiplas demandas por relato)
+            system_message = f"""Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é identificar TODOS os problemas distintos em um único relato do cidadão (ex.: "rua sem luz e com muitos assaltos" = duas demandas).
 
 Retorne APENAS um objeto JSON válido. Não inclua markdown ```json``` ou texto adicional.
 
 O JSON deve conter exatamente estes campos:
-- macro_category: string com o nome EXATO de uma destas categorias oficiais de Ouvidoria: [{categorias_str}]. Não invente nomes novos.
-- category_detail: string com o serviço ou problema específico em 1 a 3 palavras (ex.: "Tapa-buraco", "Troca de Lâmpada", "Falta de Médico").
-- sentiment_score: float entre -1.0 (muito negativo/raiva) e 1.0 (positivo/elogio). Use -1.0 APENAS para xingamentos ou fúria extrema.
-- urgency_level: int de 1 (pouco urgente) a 5 (crítico/risco de vida). USE ESTA RÉGUA: 1 = Dúvida/Informação; 2 = Serviço de rotina; 3 = Incômodo/Demora (ex.: buracos, lâmpadas queimadas, mato alto); 4 = Risco material (risco de dano a patrimônio); 5 = Risco IMINENTE à vida ou desastre. Um buraco comum é NO MÁXIMO nível 3, a menos que haja relato explícito de acidente grave ou risco imediato à vida.
-- intent: string com uma destas opções EXATAS:
-  * "COMPLAINT" (Reclamação - problema que precisa ser resolvido)
-  * "SUGGESTION" (Sugestão - ideia ou melhoria proposta)
-  * "INFORMATION" (Dúvida/Informação - pergunta ou busca de informação)
-  * "DENUNCIATION" (Denúncia - irregularidade grave)
-- summary: string com resumo executivo de uma frase (5 a 10 palavras). É PROIBIDO deixar vazio.
-- keywords: array de strings com 3 a 5 palavras-chave principais extraídas do texto. É PROIBIDO deixar vazio.
+- "has_multiple_demands": booleano (true se houver mais de um problema distinto que exija secretarias diferentes, false caso contrário).
+- "demands": lista de objetos. Cada objeto representa um problema e DEVE conter:
+    * "macro_category": APENAS UM destes valores: [{categorias_str}].
+    * "category_detail": serviço específico (ex: "Tapa-buraco", "Ronda Policial").
+    * "urgency_level": inteiro de 1 a 5 (1=Dúvida, 3=Incômodo, 5=Risco à vida).
+    * "specific_text": o trecho exato do relato do cidadão que justifica este problema.
+- "sentiment_score": float de -1.0 a 1.0.
+- "intent": string (COMPLAINT, SUGGESTION, INFORMATION, DENUNCIATION).
+- "global_summary": resumo de todo o relato em uma frase.
+- "global_keywords": lista de 3 a 5 palavras-chave gerais.
 
-IMPORTANTE: 
+IMPORTANTE:
 - Retorne APENAS o JSON válido, sem explicações, sem markdown.
-- Use o nome EXATO de uma categoria da lista [{categorias_str}] em macro_category."""
+- Use o nome EXATO de uma categoria da lista [{categorias_str}] em macro_category dentro de cada item de demands.
+- Se houver um único problema, demands terá um único elemento. Se houver vários (ex.: iluminação + segurança), liste cada um em demands."""
             
             # Preparar o prompt do usuário com o relato
             user_message = text
@@ -198,29 +199,44 @@ IMPORTANTE:
                 )
                 return None
             
-            # Extrair os dados estruturados
+            # Extrair os dados estruturados (formato com múltiplas demandas)
             sentiment_score = float(ai_data.get('sentiment_score', 0.0))
-            urgency_level = int(ai_data.get('urgency_level', 3))
             intent = ai_data.get('intent', 'COMPLAINT')
-            macro_category = ai_data.get('macro_category', '') or ai_data.get('suggested_category', '')
-            category_detail = ai_data.get('category_detail', '')
-            summary = ai_data.get('summary', '')
-            keywords = ai_data.get('keywords', [])
-            
+            global_summary = ai_data.get('global_summary', ai_data.get('summary', ''))
+            global_keywords = ai_data.get('global_keywords', ai_data.get('keywords', []))
+
+            demands = ai_data.get('demands', [])
+            has_multiple_demands = ai_data.get('has_multiple_demands', len(demands) > 1)
+
+            # Fallback de segurança se a IA não retornar demands
+            if not demands:
+                demands = [{
+                    "macro_category": "Outros",
+                    "category_detail": "Não classificado",
+                    "urgency_level": 3,
+                    "specific_text": text,
+                }]
+
+            # A demanda primária será sempre a primeira da lista
+            primary_demand = demands[0]
+            urgency_level = int(primary_demand.get('urgency_level', 3))
+            macro_category = primary_demand.get('macro_category', '')
+            category_detail = primary_demand.get('category_detail', '')
+
             # Validar intent
             valid_intents = ['COMPLAINT', 'SUGGESTION', 'INFORMATION', 'DENUNCIATION']
             if intent not in valid_intents:
                 intent = 'COMPLAINT'  # Default seguro
-            
-            # Garantir que keywords é uma lista
-            if not isinstance(keywords, list):
-                keywords = []
-            
+
+            # Garantir que global_keywords é uma lista
+            if not isinstance(global_keywords, list):
+                global_keywords = []
+
             # Validar ranges
             sentiment_score = max(-1.0, min(1.0, sentiment_score))  # Clamp entre -1 e 1
             urgency_level = max(1, min(5, urgency_level))  # Clamp entre 1 e 5
-            
-            # Buscar categoria sugerida no banco de forma direta pela macro_category
+
+            # Buscar categoria sugerida no banco pela macro_category da demanda primária
             suggested_category = None
             suggested_category_name = macro_category.strip() if macro_category else ''
             if suggested_category_name:
@@ -238,27 +254,29 @@ IMPORTANTE:
                     'total_tokens': getattr(response.usage, 'total_tokens', 0),
                 }
             
-            # Preparar resultado
+            # Preparar resultado (demanda primária + lista de todas as demandas)
             result = {
                 'sentiment_score': sentiment_score,
                 'urgency_level': urgency_level,
                 'intent': intent,
+                'suggested_category': suggested_category,
+                'suggested_category_name': suggested_category.name if suggested_category else macro_category,
                 'category': suggested_category_name,
                 'category_detail': category_detail,
-                'suggested_category': suggested_category,
-                'suggested_category_name': suggested_category.name if suggested_category else suggested_category_name,
-                'keywords': keywords,
-                'summary': summary,
+                'keywords': global_keywords,
+                'summary': global_summary,
+                'has_multiple_demands': has_multiple_demands,
+                'all_demands': demands,
                 'raw_ai_response': {
                     'model': response.model,
                     'api_base': api_base,
                     'usage': usage_data,
                     'response_text': ai_response_text,
                     'parsed_json': ai_data,
-                }
+                },
             }
             
-            # Se deve salvar no banco
+            # Se deve salvar no banco (campos do NLPAnalysis usam demanda primária; lista completa em parsed_json)
             if save_to_db and manifestation_instance:
                 nlp_analysis, created = NLPAnalysis.objects.update_or_create(
                     manifestation=manifestation_instance,
@@ -267,14 +285,14 @@ IMPORTANTE:
                         'urgency_level': urgency_level,
                         'intent': intent,
                         'suggested_category': suggested_category,
-                        'keywords': keywords,
-                        'summary': summary,
+                        'keywords': global_keywords,
+                        'summary': global_summary,
                         'raw_ai_response': {
                             'model': response.model,
                             'api_base': api_base,
                             'usage': usage_data,
                             'response_text': ai_response_text,
-                            'parsed_json': ai_data,
+                            'parsed_json': ai_data,  # contém demands e has_multiple_demands para uso futuro
                             'full_response': {
                                 'id': getattr(response, 'id', None),
                                 'created': getattr(response, 'created', None),
@@ -322,6 +340,9 @@ IMPORTANTE:
         """
         Analisa uma manifestação usando LLM e salva o resultado no banco de dados.
         Wrapper para analyze_text com save_to_db=True.
+
+        Antes da análise de IA, tenta obter coordenadas geográficas a partir do endereço,
+        caso a manifestação tenha endereço mas ainda não tenha latitude/longitude.
         
         Args:
             manifestation_instance: Instância de Manifestation a ser analisada
@@ -329,10 +350,20 @@ IMPORTANTE:
         Returns:
             NLPAnalysis: Instância criada/atualizada ou None em caso de erro
         """
+        # Tenta buscar coordenadas se houver endereço, mas não houver lat/lon
+        if manifestation_instance.location_address and (
+            not manifestation_instance.latitude or not manifestation_instance.longitude
+        ):
+            lat, lon = GeocodingService.get_coordinates(manifestation_instance.location_address)
+            if lat and lon:
+                manifestation_instance.latitude = lat
+                manifestation_instance.longitude = lon
+                manifestation_instance.save(update_fields=["latitude", "longitude"])
+
         return LLMService.analyze_text(
             text=manifestation_instance.description,
             save_to_db=True,
-            manifestation_instance=manifestation_instance
+            manifestation_instance=manifestation_instance,
         )
 
 

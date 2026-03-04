@@ -711,7 +711,7 @@ class ManifestationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         
-        # Preparar resposta formatada
+        # Preparar resposta formatada (inclui múltiplas demandas para cross-sell no frontend)
         response_data = {
             'summary': analysis_result.get('summary', ''),
             'intent': analysis_result.get('intent', 'COMPLAINT'),
@@ -730,6 +730,8 @@ class ManifestationViewSet(viewsets.ModelViewSet):
             }.get(analysis_result.get('urgency_level', 3), 'Média'),
             'sentiment_score': analysis_result.get('sentiment_score', 0.0),
             'keywords': analysis_result.get('keywords', []),
+            'has_multiple_demands': analysis_result.get('has_multiple_demands', False),
+            'all_demands': analysis_result.get('all_demands', []),
         }
         
         # Incluir dados da categoria se encontrada

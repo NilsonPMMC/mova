@@ -18,11 +18,11 @@
           <p class="text-sm text-gray-800">{{ locationAddress }}</p>
         </div>
 
-        <!-- Anônimo -->
+        <!-- Identificação -->
         <div>
           <p class="text-xs font-semibold text-gray-500 uppercase mb-1">Tipo</p>
           <p class="text-sm text-gray-800">
-            {{ isAnonymous ? 'Manifestação anônima' : 'Manifestação identificada' }}
+            Manifestação identificada
           </p>
         </div>
 
@@ -77,7 +77,6 @@ defineEmits<{
 const store = useManifestationStore()
 const description = store.description
 const locationAddress = store.locationAddress
-const isAnonymous = store.isAnonymous
 const canSubmit = store.canSubmit
 const isSubmitting = store.isSubmitting
 const files = store.files

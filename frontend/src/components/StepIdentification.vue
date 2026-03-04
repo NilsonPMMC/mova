@@ -19,10 +19,10 @@
         </p>
       </div>
 
-      <!-- Nome (opcional) -->
+      <!-- Nome (obrigatório) -->
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-2">
-          Nome completo (opcional)
+          Nome completo <span class="text-red-500">*</span>
         </label>
         <input
           v-model="localName"
@@ -33,31 +33,23 @@
         />
       </div>
 
-      <!-- Celular (opcional, WhatsApp) -->
+      <!-- Celular (obrigatório) -->
       <div>
         <label class="block text-sm font-medium text-gray-700 mb-2">
-          Celular (opcional)
+          Celular <span class="text-red-500">*</span>
         </label>
         <input
-          v-model="localPhone"
+          :value="localPhone"
           type="tel"
           inputmode="numeric"
           placeholder="(11) 99999-9999"
           class="w-full px-4 py-3 rounded-xl border-2 border-gray-200 focus:border-gov-blue focus:outline-none transition-colors text-gray-800 placeholder-gray-400"
-          @input="syncStore"
+          @input="onPhoneInput"
         />
         <p class="text-xs text-gray-500 mt-1">
-          Para receber atualizações por WhatsApp
+          Para contato e atualizações (ex.: WhatsApp). Mínimo 10 dígitos.
         </p>
       </div>
-
-      <!-- Botão Anônimo -->
-      <button
-        @click="handleAnonymous"
-        class="w-full text-sm text-gray-600 hover:text-gray-800 underline py-2"
-      >
-        Prefiro continuar anônimo
-      </button>
 
       <!-- Botão Continuar -->
       <div v-if="canContinue" class="pt-2">
@@ -94,7 +86,7 @@ const store = useManifestationStore()
 // Valores locais: CPF formatado para exibição, nome e celular
 const localCpf = ref('')
 const localName = ref(store.citizenName || '')
-const localPhone = ref(store.citizenPhone || '')
+const localPhone = ref(store.citizenPhone ? formatPhone(store.citizenPhone) : '')
 
 function loadCpfFromStorage() {
   try {
@@ -115,29 +107,52 @@ onMounted(() => {
     loadCpfFromStorage()
   }
   localName.value = store.citizenName || ''
-  localPhone.value = store.citizenPhone || ''
+  localPhone.value = store.citizenPhone ? formatPhone(store.citizenPhone) : ''
 })
 
 watch(() => store.citizenName, (v) => { if (v) localName.value = v })
-watch(() => store.citizenPhone, (v) => { if (v) localPhone.value = v })
+watch(() => store.citizenPhone, (v) => { if (v) localPhone.value = formatPhone(v) })
 
-const canContinue = computed(() => store.citizenCpf.length === 11)
+const canContinue = computed(() => {
+  const nameOk = (store.citizenName || '').trim().length >= 2
+  const cpfOk = store.citizenCpf.length === 11
+  const phoneDigitsOnly = (store.citizenPhone || '').replace(/\D/g, '')
+  const phoneOk = phoneDigitsOnly.length >= 10
+  return cpfOk && nameOk && phoneOk
+})
 
 function onCpfUpdate(digits: string) {
   store.setCitizenData(localName.value, '', digits, localPhone.value)
   localCpf.value = formatCpf(digits)
 }
 
+function phoneDigits(value: string): string {
+  return value.replace(/\D/g, '').slice(0, 11)
+}
+
+function formatPhone(value: string): string {
+  const digits = phoneDigits(value)
+  if (!digits) return ''
+  if (digits.length <= 2) return `(${digits}`
+  if (digits.length <= 6) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`
+  if (digits.length <= 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`
+  }
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`
+}
+
+function onPhoneInput(e: Event) {
+  const target = e.target as HTMLInputElement
+  const digits = phoneDigits(target.value)
+  localPhone.value = formatPhone(digits)
+  syncStore()
+}
+
 function syncStore() {
-  store.setCitizenData(localName.value, '', store.citizenCpf, localPhone.value)
+  store.setCitizenData(localName.value, '', store.citizenCpf, phoneDigits(localPhone.value))
 }
 
 function handleContinue() {
-  // Garantir que se há CPF válido, não é anônimo
-  if (store.citizenCpf && store.citizenCpf.length === 11) {
-    store.setAnonymous(false)
-  }
-  
   // Persistir CPF para próxima visita
   if (store.citizenCpf) {
     try {
@@ -146,15 +161,6 @@ function handleContinue() {
       // ignore
     }
   }
-  emit('continue')
-}
-
-function handleAnonymous() {
-  store.setAnonymous(true)
-  store.setCitizenData('', '', '', '')
-  localName.value = ''
-  localPhone.value = ''
-  localCpf.value = ''
   emit('continue')
 }
 </script>

@@ -12,18 +12,17 @@
         <div class="flex gap-3">
           <div class="flex-1 relative">
             <component :is="UserIcon" :size="20" class="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              v-model="cpfInput"
-              @keyup.enter="handleSearch"
-              type="text"
-              placeholder="Digite seu CPF (apenas números)"
-              maxlength="11"
-              class="w-full pl-12 pr-4 py-4 border-2 border-gray-200 rounded-xl focus:border-gov-blue focus:outline-none text-lg"
-            />
+            <div class="pl-10">
+              <CpfInput
+                :model-value="cpfInput"
+                :show-status="false"
+                @update:model-value="onCpfUpdate"
+              />
+            </div>
           </div>
           <button
             @click="handleSearch"
-            :disabled="!cpfInput.trim() || isLoading"
+            :disabled="cpfInput.length !== 11 || isLoading"
             class="px-8 py-4 bg-gov-blue text-white font-semibold rounded-xl hover:bg-gov-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <component v-if="isLoading" :is="LoaderIcon" :size="20" class="animate-spin" />
@@ -127,6 +126,7 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Loader, ChevronRight, Tag, Sparkles, AlertCircle, FileX } from 'lucide-vue-next'
 import apiService from '@/services/api'
+import CpfInput from '@/components/CpfInput.vue'
 
 const router = useRouter()
 
@@ -179,8 +179,12 @@ function goToTrack(protocol: string) {
   router.push({ path: '/acompanhar', query: { protocol } })
 }
 
+function onCpfUpdate(digits: string) {
+  cpfInput.value = digits
+}
+
 async function handleSearch() {
-  const cpf = cpfInput.value.trim().replace(/[^\d]/g, '')
+  const cpf = cpfInput.value.trim()
   if (!cpf || cpf.length !== 11) {
     searchError.value = 'CPF inválido. Digite 11 dígitos.'
     return

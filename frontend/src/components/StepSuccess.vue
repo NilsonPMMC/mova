@@ -178,6 +178,30 @@
         </div>
       </div>
 
+      <!-- Cross-sell: outras demandas detectadas pela IA -->
+      <div v-if="pendingDemands.length > 0" class="mt-4 space-y-3">
+        <p class="text-sm font-medium text-gray-700">Outros problemas identificados no seu relato</p>
+        <div
+          v-for="(demand, index) in pendingDemands"
+          :key="index"
+          class="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm"
+        >
+          <p class="text-sm text-gray-800 mb-3">
+            <span class="inline-block mr-1" aria-hidden="true">💡</span>
+            Notamos que você também relatou: <strong>{{ demand.category_detail || 'Outro' }}</strong>
+            <span v-if="demand.macro_category" class="text-gray-600">({{ demand.macro_category }})</span>.
+            Deseja registrar este problema agora aproveitando seus dados de localização?
+          </p>
+          <button
+            type="button"
+            @click="registerNewDemand(demand)"
+            class="w-full px-4 py-2 bg-gov-blue text-white text-sm font-medium rounded-lg hover:bg-gov-dark transition-colors"
+          >
+            Registrar Nova Demanda
+          </button>
+        </div>
+      </div>
+
       <!-- Botões de Ação -->
       <div class="flex gap-3">
         <button
@@ -209,15 +233,28 @@ const props = defineProps<{
   protocol: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   new: []
   home: []
+  'register-another-demand': []
 }>()
 
 const store = useManifestationStore()
 const manifestationData = ref<any>(null)
 const isAnalyzing = ref(true)
 const pollingInterval = ref<number | null>(null)
+
+/** Demandas adicionais detectadas pela IA (índice 1 em diante); a primeira já gerou o protocolo */
+const pendingDemands = computed(() => {
+  const all = store.draftAnalysis?.all_demands
+  if (!Array.isArray(all) || all.length <= 1) return []
+  return all.slice(1)
+})
+
+function registerNewDemand(demand: { specific_text?: string }) {
+  store.startNewDemandFromCrossSell(demand)
+  emit('register-another-demand')
+}
 
 const CheckCircleIcon = CheckCircle
 const ClockIcon = Clock

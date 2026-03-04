@@ -44,7 +44,7 @@ class ManifestationCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
         write_only=True,
-        help_text='Nome do cidadão (opcional)'
+        help_text='Nome completo do cidadão (obrigatório)'
     )
     citizen_email = serializers.EmailField(
         required=False,
@@ -64,7 +64,7 @@ class ManifestationCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
         write_only=True,
-        help_text='Celular do cidadão (opcional, para WhatsApp)'
+        help_text='Telefone do cidadão (obrigatório, mínimo 10 dígitos)'
     )
     citizen_correction = serializers.CharField(
         required=False,
@@ -206,7 +206,7 @@ class ManifestationCreateSerializer(serializers.ModelSerializer):
         citizen_cpf_raw = data.get('citizen_cpf', '').strip()
         citizen_cpf = re.sub(r'[^\d]', '', citizen_cpf_raw) if citizen_cpf_raw else ''
         
-        # Ouvidor exige CPF quando o cidadão não é anônimo
+        # Regras do sistema: CPF, Nome e Telefone são obrigatórios (quando não anônimo)
         if not is_anonymous:
             if not citizen_cpf or len(citizen_cpf) != 11:
                 raise serializers.ValidationError(
@@ -218,8 +218,19 @@ class ManifestationCreateSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"citizen_cpf": "CPF inválido. Verifique os números."}
                 )
-            # Normalizar para 11 dígitos no payload
             data['citizen_cpf'] = re.sub(r'[^\d]', '', citizen_cpf_raw)[:11]
+
+            if not citizen_name or len(citizen_name) < 2:
+                raise serializers.ValidationError(
+                    {"citizen_name": "Nome completo é obrigatório."}
+                )
+
+            citizen_phone_raw = data.get('citizen_phone', '').strip()
+            citizen_phone_digits = re.sub(r'[^\d]', '', citizen_phone_raw) if citizen_phone_raw else ''
+            if not citizen_phone_digits or len(citizen_phone_digits) < 10:
+                raise serializers.ValidationError(
+                    {"citizen_phone": "Telefone é obrigatório. Informe pelo menos 10 dígitos."}
+                )
         
         return data
 

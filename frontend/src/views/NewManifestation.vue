@@ -122,6 +122,7 @@
           :protocol="store.submittedProtocol"
           @new="handleNewManifestation"
           @home="$router.push('/')"
+          @register-another-demand="handleRegisterAnotherDemand"
         />
       </div>
 
@@ -213,6 +214,11 @@ async function handleSubmit() {
 function handleNewManifestation() {
   store.reset()
   currentStep.value = 1
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function handleRegisterAnotherDemand() {
+  currentStep.value = 3
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 </script>

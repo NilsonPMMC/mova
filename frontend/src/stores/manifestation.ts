@@ -16,6 +16,18 @@ export interface ManifestationData {
   citizen_phone?: string
 }
 
+/** Resultado da análise de IA (rascunho ou pós-envio) para múltiplas demandas (cross-sell) */
+export interface DraftAnalysisResult {
+  has_multiple_demands?: boolean
+  all_demands?: Array<{
+    macro_category?: string
+    category_detail?: string
+    urgency_level?: number
+    specific_text?: string
+  }>
+  [key: string]: unknown
+}
+
 export const useManifestationStore = defineStore('manifestation', () => {
   // Estado
   const description = ref<string>('')
@@ -33,8 +45,8 @@ export const useManifestationStore = defineStore('manifestation', () => {
   const citizenPhone = ref<string>('')
   const citizenCorrection = ref<string>('')
   
-  // Análise prévia da IA
-  const draftAnalysis = ref<any>(null)
+  // Análise prévia da IA (inclui has_multiple_demands e all_demands para cross-sell)
+  const draftAnalysis = ref<DraftAnalysisResult | null>(null)
   
   // Anexos/Arquivos
   const files = ref<File[]>([])
@@ -45,9 +57,14 @@ export const useManifestationStore = defineStore('manifestation', () => {
   const submittedProtocol = ref<string | null>(null)
   const error = ref<string | null>(null)
 
-  // Computed
+  // Computed (CPF, Nome e Telefone são obrigatórios)
   const canSubmit = computed(() => {
-    return description.value.trim().length > 10 && !isSubmitting.value
+    const descOk = description.value.trim().length > 10
+    const cpfOk = citizenCpf.value.length === 11
+    const nameOk = (citizenName.value || '').trim().length >= 2
+    const phoneDigits = (citizenPhone.value || '').replace(/\D/g, '')
+    const phoneOk = phoneDigits.length >= 10
+    return descOk && !isSubmitting.value && cpfOk && nameOk && phoneOk
   })
 
   const hasLocation = computed(() => {
@@ -72,7 +89,8 @@ export const useManifestationStore = defineStore('manifestation', () => {
   }
 
   function setAnonymous(value: boolean) {
-    isAnonymous.value = value
+    // Mantido apenas por compatibilidade, mas todas manifestações agora são identificadas
+    isAnonymous.value = false
   }
 
   function setOrigin(value: string) {
@@ -226,8 +244,19 @@ export const useManifestationStore = defineStore('manifestation', () => {
     citizenCorrection.value = value
   }
 
-  function setDraftAnalysis(analysis: any) {
+  function setDraftAnalysis(analysis: DraftAnalysisResult | null) {
     draftAnalysis.value = analysis
+  }
+
+  /**
+   * Prepara o rascunho para registrar uma nova demanda (cross-sell).
+   * Limpa protocolo e análise; mantém cidadão e localização; define a descrição como o trecho da demanda.
+   */
+  function startNewDemandFromCrossSell(demand: { specific_text?: string }) {
+    submittedProtocol.value = null
+    draftAnalysis.value = null
+    error.value = null
+    description.value = (demand.specific_text || '').trim() || description.value
   }
 
   function setFiles(filesList: File[], descriptions: string[] = []) {
@@ -292,6 +321,7 @@ export const useManifestationStore = defineStore('manifestation', () => {
     setDraftAnalysis,
     setFiles,
     submitManifestation,
+    startNewDemandFromCrossSell,
     reset,
   }
 })
