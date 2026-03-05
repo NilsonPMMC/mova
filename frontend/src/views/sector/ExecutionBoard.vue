@@ -99,18 +99,14 @@ function onSectorChange() {
 }
 
 async function initializeSector() {
-  auth.checkAuth()
-
   if (auth.user && auth.user.is_superuser === false && auth.user.sector) {
-    const s = auth.user.sector
-    selectedSector.value = s
-    if (store.sector !== s) await store.setSector(s)
+    selectedSector.value = auth.user.sector
+    await store.setSector(auth.user.sector)
   } else if (auth.user?.is_superuser === true) {
     const sectorFromRoute = (route.params.sector as string) || (route.query.sector as string) || ''
     if (sectorFromRoute) {
-      const s = sectorFromRoute.toUpperCase()
-      selectedSector.value = s
-      if (store.sector !== s) await store.setSector(s)
+      selectedSector.value = sectorFromRoute.toUpperCase()
+      await store.setSector(selectedSector.value)
     }
   }
 }
