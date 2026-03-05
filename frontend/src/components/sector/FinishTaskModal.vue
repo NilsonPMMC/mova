@@ -79,7 +79,7 @@ import { ref } from 'vue'
 import { AlertTriangle, CheckCircle2, Loader2 } from '@/utils/icons'
 import type { WorkOrderItem } from '@/stores/sector-board'
 
-const props = defineProps<{
+defineProps<{
   item: WorkOrderItem
 }>()
 

@@ -88,7 +88,7 @@ export const useManifestationStore = defineStore('manifestation', () => {
     }
   }
 
-  function setAnonymous(value: boolean) {
+  function setAnonymous(_value: boolean) {
     // Mantido apenas por compatibilidade, mas todas manifestações agora são identificadas
     isAnonymous.value = false
   }

@@ -313,12 +313,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Users, X } from '@/utils/icons'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import apiService from '@/services/api'
 
 const router = useRouter()
-const route = useRoute()
 const auth = useAuthStore()
 
 const searchQuery = ref('')

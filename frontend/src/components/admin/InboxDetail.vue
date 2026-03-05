@@ -186,7 +186,7 @@
               Nenhum relato agrupado encontrado.
             </div>
             <div
-              v-for="(rel, idx) in relatedManifestations"
+              v-for="rel in relatedManifestations"
               :key="rel.id"
               class="p-4 bg-slate-50 rounded-lg border border-slate-200"
             >
@@ -263,14 +263,13 @@ const detail = computed(() => store.selectedDetail)
 
 const activeTab = ref<'relato' | 'mapa' | 'cidadao' | 'agrupados'>('relato')
 const tabs = computed(() => {
-  const base = [
-    { id: 'relato' as const, label: 'Relato' },
-    { id: 'mapa' as const, label: 'Mapa' },
-    { id: 'cidadao' as const, label: 'Cidadão' },
+  const base: { id: 'relato' | 'mapa' | 'cidadao' | 'agrupados'; label: string }[] = [
+    { id: 'relato', label: 'Relato' },
+    { id: 'mapa', label: 'Mapa' },
+    { id: 'cidadao', label: 'Cidadão' },
   ]
-  // Adicionar aba "Relatos Agrupados" apenas se houver relatos relacionados
   if (relatedManifestations.value.length > 0) {
-    base.push({ id: 'agrupados' as const, label: `Relatos Agrupados (${relatedManifestations.value.length})` })
+    base.push({ id: 'agrupados', label: `Relatos Agrupados (${relatedManifestations.value.length})` })
   }
   return base
 })
@@ -322,15 +321,6 @@ const hasCoords = computed(() => {
 const suggestedCategoryId = computed(() => {
   const d = detail.value
   return d?.category_detail?.id ?? d?.nlp_analysis?.suggested_category ?? null
-})
-
-const suggestedSector = computed(() => {
-  const d = detail.value
-  const sector = d?.category_detail?.default_sector
-  if (sector) return sector
-  const id = forwardCategoryId.value
-  if (id) return categories.value.find((c) => c.id === id)?.default_sector
-  return null
 })
 
 const apiOrigin = (() => {
