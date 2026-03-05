@@ -67,56 +67,55 @@ const router = createRouter({
 router.beforeEach((to, _from, next) => {
   const auth = useAuthStore()
   auth.checkAuth()
-  
-  // Verificar autenticação básica
+
+  // ——— TRAVA: rota exige auth e não está autenticado ———
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    next({ name: 'login', query: { redirect: to.fullPath } })
-    return
+    if (to.path === '/login') {
+      return next()
+    }
+    return next({ name: 'login', query: { redirect: to.fullPath } })
   }
-  
-  // Se não está autenticado, prosseguir normalmente
+
+  // ——— TRAVA: autenticado tentando acessar login ———
+  if (to.path === '/login' && auth.isAuthenticated) {
+    return next({ name: 'home' })
+  }
+
+  // Sem usuário carregado ainda: liberar (evita loop em rotas públicas)
   if (!auth.isAuthenticated || !auth.user) {
-    next()
-    return
+    return next()
   }
-  
+
   const user = auth.user
   const isSuperuser = user.is_superuser === true
   const hasSector = !!user.sector && user.sector.trim() !== ''
   const isStaff = user.is_staff === true
-  
-  // Regra 1: /admin/inbox e /admin/search - Apenas Superusuários e Grupo "Ouvidoria"
-  // LÓGICA ESTRITA: Se tem setor definido E NÃO é superadmin, BLOQUEAR acesso a /admin
+
+  // ——— Regra ADMIN: tem setor e não é super → vai para /sector ———
   if (to.path.startsWith('/admin')) {
-    // Se tem setor E não é superadmin, bloquear completamente
     if (hasSector && !isSuperuser) {
-      // Chuta para o board do setor dele
-      next({ name: 'sector-board', query: { sector: user.sector } })
-      return
+      if (to.path.startsWith('/sector')) return next()
+      return next({ name: 'sector-board', query: { sector: user.sector } })
     }
-    // Se não tem setor mas também não é superadmin nem staff, bloquear
     if (!isSuperuser && !isStaff) {
-      // Sem setor e sem permissão: redirecionar para home
-      next({ name: 'home' })
-      return
+      if (to.path === '/') return next()
+      return next({ name: 'home' })
     }
   }
-  
-  // Regra 2: /sector - Apenas usuários com sector ou superusuários
+
+  // ——— Regra SECTOR: sem setor e não é super → redireciona ———
   if (to.path.startsWith('/sector')) {
     if (!isSuperuser && !hasSector) {
-      // Sem setor e não é superadmin: redirecionar
       if (isStaff) {
-        // Staff sem setor: pode ir para admin
-        next({ name: 'admin-inbox' })
-      } else {
-        next({ name: 'home' })
+        if (to.path.startsWith('/admin')) return next()
+        return next({ name: 'admin-inbox' })
       }
-      return
+      if (to.path === '/') return next()
+      return next({ name: 'home' })
     }
   }
-  
-  next()
+
+  return next()
 })
 
 export default router
