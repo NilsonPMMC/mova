@@ -79,7 +79,13 @@ export const useSectorBoardStore = defineStore('sector-board', () => {
 
   async function setSector(s: string) {
     sector.value = s
-    await Promise.all([fetchEntrada(), fetchWorkOrders()])
+    loading.value = true
+    error.value = null
+    try {
+      await Promise.all([fetchEntrada(), fetchWorkOrders()])
+    } finally {
+      loading.value = false
+    }
   }
 
   async function fetchEntrada() {
@@ -89,6 +95,7 @@ export const useSectorBoardStore = defineStore('sector-board', () => {
         params: {
           forwarded_sector: sector.value,
           ordering: '-created_at',
+          page_size: 50,
         },
       })
       const data = Array.isArray(res.data) ? res.data : res.data.results ?? res.data
@@ -118,7 +125,7 @@ export const useSectorBoardStore = defineStore('sector-board', () => {
     if (!sector.value) return
     try {
       const res = await apiService.get('/reports/work-orders/', {
-        params: { sector: sector.value },
+        params: { sector: sector.value, page_size: 100 },
       })
       const data = Array.isArray(res.data) ? res.data : res.data.results ?? res.data
       workOrders.value = (data as any[]).map(normalizeWorkOrder)

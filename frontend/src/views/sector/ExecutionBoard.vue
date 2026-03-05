@@ -99,32 +99,19 @@ function onSectorChange() {
 }
 
 async function initializeSector() {
-  // Garantir que os dados do usuário estão carregados
   auth.checkAuth()
-  
-  // Aguardar um tick para garantir que o auth.user está atualizado
-  await new Promise(resolve => setTimeout(resolve, 100))
-  
-  // Debug: log para verificar dados
-  console.log('[ExecutionBoard] Auth user:', auth.user)
-  console.log('[ExecutionBoard] is_superuser:', auth.user?.is_superuser)
-  console.log('[ExecutionBoard] sector:', auth.user?.sector)
-  
-  // Se user comum tem setor fixo, usar esse setor
+
   if (auth.user && auth.user.is_superuser === false && auth.user.sector) {
-    console.log('[ExecutionBoard] Usuário comum com setor:', auth.user.sector)
-    selectedSector.value = auth.user.sector
-    await store.setSector(auth.user.sector)
+    const s = auth.user.sector
+    selectedSector.value = s
+    if (store.sector !== s) await store.setSector(s)
   } else if (auth.user?.is_superuser === true) {
-    console.log('[ExecutionBoard] Superadmin detectado')
-    // Superadmin: pode escolher via rota ou seleção
     const sectorFromRoute = (route.params.sector as string) || (route.query.sector as string) || ''
     if (sectorFromRoute) {
-      selectedSector.value = sectorFromRoute.toUpperCase()
-      await store.setSector(selectedSector.value)
+      const s = sectorFromRoute.toUpperCase()
+      selectedSector.value = s
+      if (store.sector !== s) await store.setSector(s)
     }
-  } else {
-    console.warn('[ExecutionBoard] Usuário sem setor ou dados incompletos:', auth.user)
   }
 }
 
