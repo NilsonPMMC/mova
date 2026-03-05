@@ -33,6 +33,11 @@ class ManifestationCategory(TimeStampedModel):
         help_text='Setor para despacho automático (ex: OBRAS, SAÚDE, ZELADORIA). Vazio = triagem manual.'
     )
     description = models.TextField(blank=True, null=True, verbose_name='Descrição')
+    is_smart_service = models.BooleanField(
+        default=False,
+        verbose_name='É Serviço Inteligente?',
+        help_text='Se True, aciona fluxos específicos no frontend (ex: formulário de castração)'
+    )
 
     class Meta:
         db_table = 'manifestation_categories'
@@ -131,6 +136,12 @@ class Manifestation(TimeStampedModel):
         blank=True,
         null=True,
         verbose_name='Endereço'
+    )
+    service_data = models.JSONField(
+        verbose_name='Dados Específicos do Serviço',
+        null=True,
+        blank=True,
+        help_text='Armazena dados flexíveis de formulários específicos (ex: dados do animal para castração, agenda, etc.)'
     )
     latitude = models.DecimalField(
         max_digits=10,

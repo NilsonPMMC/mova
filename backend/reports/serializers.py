@@ -18,7 +18,7 @@ class ManifestationCategorySerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ManifestationCategory
-        fields = ['id', 'name', 'slug', 'full_path', 'sla_hours', 'is_active', 'default_sector']
+        fields = ['id', 'name', 'slug', 'full_path', 'sla_hours', 'is_active', 'default_sector', 'is_smart_service']
         read_only_fields = ['id', 'slug']
 
     def get_full_path(self, obj):
@@ -158,6 +158,7 @@ class ManifestationCreateSerializer(serializers.ModelSerializer):
             'location_address',
             'latitude',
             'longitude',
+            'service_data',
             'is_anonymous',
             'origin',
             'citizen_name',
@@ -507,6 +508,7 @@ class ManifestationDetailSerializer(serializers.ModelSerializer):
             'location_address',
             'latitude',
             'longitude',
+            'service_data',
             'is_anonymous',
             'category',
             'category_detail',
@@ -647,6 +649,7 @@ class TrackManifestationSerializer(serializers.ModelSerializer):
             'nlp_summary',
             'nlp_urgency',
             'location_address',
+            'service_data',
             'created_at',
             'resolved_at',
             'updates',
@@ -762,6 +765,7 @@ class ManifestationListSerializer(serializers.ModelSerializer):
             'citizen_name',
             'is_anonymous',
             'origin',
+            'service_data',
             'created_at',
             'has_nlp_analysis',
             'engagement_count',
