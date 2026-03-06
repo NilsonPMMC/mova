@@ -1,13 +1,36 @@
+from datetime import date
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from core.validators import validate_cpf as validate_cpf_core
-from .models import ManifestationCategory, Manifestation, ManifestationUpdate, Attachment, SatisfactionSurvey, WorkOrder
+from .models import ManifestationCategory, Manifestation, ManifestationUpdate, Attachment, SatisfactionSurvey, WorkOrder, ServicePartner, ServiceSchedule
 from intelligence.serializers import NLPAnalysisSerializer
 import os
 import re
 
 User = get_user_model()
+
+
+class ServiceScheduleSerializer(serializers.ModelSerializer):
+    available_slots = serializers.ReadOnlyField()
+
+    class Meta:
+        model = ServiceSchedule
+        fields = ['id', 'date', 'time_slot', 'available_slots']
+
+
+class ServicePartnerSerializer(serializers.ModelSerializer):
+    schedules = serializers.SerializerMethodField()
+    distance_meters = serializers.FloatField(read_only=True, required=False)
+
+    class Meta:
+        model = ServicePartner
+        fields = ['id', 'name', 'address', 'latitude', 'longitude', 'accepted_types', 'schedules', 'distance_meters']
+
+    def get_schedules(self, obj):
+        schedules = obj.schedules.filter(is_active=True, date__gte=date.today()).order_by('date', 'time_slot')
+        valid_schedules = [s for s in schedules if s.available_slots > 0]
+        return ServiceScheduleSerializer(valid_schedules, many=True).data
 
 
 class ManifestationCategorySerializer(serializers.ModelSerializer):
@@ -159,6 +182,7 @@ class ManifestationCreateSerializer(serializers.ModelSerializer):
             'latitude',
             'longitude',
             'service_data',
+            'service_schedule',
             'is_anonymous',
             'origin',
             'citizen_name',

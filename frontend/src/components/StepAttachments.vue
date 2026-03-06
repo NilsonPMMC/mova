@@ -9,6 +9,15 @@
     </ChatBubble>
 
     <div class="ml-13 mt-4">
+      <!-- Instruções específicas para Castração -->
+      <div v-if="isCastration" class="mb-6 bg-blue-50 p-4 rounded-lg border border-blue-200">
+        <h3 class="font-bold text-blue-800 mb-2">Documentos Obrigatórios para Castração</h3>
+        <ul class="list-disc pl-5 text-sm text-blue-700 space-y-1">
+          <li>Foto do RG ou CNH (Frente e Verso)</li>
+          <li>Comprovante de Endereço atualizado no seu nome (ou pais/cônjuge)</li>
+        </ul>
+      </div>
+
       <!-- Área de Upload -->
       <div
         @drop.prevent="handleDrop"
@@ -89,16 +98,45 @@
         </div>
       </div>
 
+      <!-- Procuração Digital (Condução do Animal) -->
+      <div v-if="isCastration" class="mt-8 border-t border-slate-200 pt-6">
+        <h3 class="font-bold text-slate-800 mb-4">Procuração Digital (Condução do Animal)</h3>
+        <div class="mb-4">
+          <label class="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" v-model="isOwnerTaking" class="rounded border-slate-300 w-5 h-5 text-blue-600 focus:ring-blue-500">
+            <span class="font-medium">Eu mesmo(a) vou levar o animal no dia da cirurgia.</span>
+          </label>
+        </div>
+
+        <div v-if="!isOwnerTaking" class="space-y-4 bg-slate-50 p-4 rounded-lg border border-slate-200 animate-fade-in">
+          <p class="text-sm text-slate-600 mb-2">Preencha os dados da pessoa que conduzirá o animal por você:</p>
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">Nome Completo do Condutor</label>
+            <input type="text" v-model="conductorName" placeholder="Nome da pessoa que vai levar" class="w-full rounded-md border-slate-300 text-sm p-2">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-slate-700 mb-1">CPF do Condutor</label>
+            <input type="text" v-model="conductorCpf" placeholder="000.000.000-00" class="w-full rounded-md border-slate-300 text-sm p-2">
+          </div>
+          <div class="mt-4 bg-white p-3 border border-slate-200 rounded">
+            <label class="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" v-model="acceptProxy" class="mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+              <span class="text-xs leading-relaxed">Declaro, sob as penas da lei, que autorizo o cidadão acima a conduzir meu animal para a clínica, assumindo a responsabilidade por eventuais decisões médicas de emergência.</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
       <!-- Botões de Ação -->
       <div class="mt-6 flex gap-3">
         <button
-          @click="$emit('continue')"
+          @click="handleNext"
           class="flex-1 px-6 py-3 bg-gov-blue text-white font-medium rounded-xl hover:bg-gov-dark transition-colors"
         >
           Continuar
         </button>
         <button
-          v-if="files.length === 0"
+          v-if="files.length === 0 && !isCastration"
           @click="$emit('skip')"
           class="px-6 py-3 bg-gray-200 text-gray-700 font-medium rounded-xl hover:bg-gray-300 transition-colors"
         >
@@ -110,9 +148,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { Upload, File, X } from 'lucide-vue-next'
 import ChatBubble from './ChatBubble.vue'
+import { useManifestationStore } from '@/stores/manifestation'
 
 defineProps<{
   message?: string
@@ -123,6 +162,15 @@ const emit = defineEmits<{
   skip: []
   'files-selected': [files: File[], descriptions: string[]]
 }>()
+
+const store = useManifestationStore()
+const isCastration = computed(() => store.draftAnalysis?.intent === 'SERVICE_CASTRATION')
+
+// Variáveis da Procuração Digital
+const isOwnerTaking = ref(true)
+const conductorName = ref('')
+const conductorCpf = ref('')
+const acceptProxy = ref(false)
 
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const files = ref<File[]>([])
@@ -229,6 +277,40 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function handleNext() {
+  // Validação de Documentos Obrigatórios para Castração
+  const currentFiles = files.value || []
+  if (isCastration.value && currentFiles.length < 2) {
+    alert('Atenção: Para o serviço de castração, é obrigatório anexar no mínimo 2 documentos (Foto do RG/CNH e Comprovante de Endereço).')
+    return
+  }
+
+  if (isCastration.value && !isOwnerTaking.value) {
+    if (!conductorName.value?.trim() || !conductorCpf.value?.trim()) {
+      alert('Por favor, preencha o nome e o CPF do condutor.')
+      return
+    }
+    const cpfDigits = conductorCpf.value.replace(/\D/g, '')
+    if (cpfDigits.length !== 11) {
+      alert('Por favor, informe um CPF válido do condutor (11 dígitos).')
+      return
+    }
+    if (!acceptProxy.value) {
+      alert('Você precisa aceitar o termo de responsabilidade da procuração.')
+      return
+    }
+    store.updateServiceData({
+      is_owner_taking: false,
+      conductor_name: conductorName.value.trim(),
+      conductor_cpf: conductorCpf.value.trim(),
+      proxy_accepted: true,
+    })
+  } else if (isCastration.value && isOwnerTaking.value) {
+    store.updateServiceData({ is_owner_taking: true })
+  }
+  emit('continue')
 }
 
 // Expor dados para componente pai

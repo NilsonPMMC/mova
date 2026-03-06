@@ -10,17 +10,37 @@ class VectorService:
     def __init__(self):
         self.base_url = getattr(settings, 'AI_KERNEL_URL', 'http://192.168.10.50:8004/v1')
         self.model = getattr(settings, 'AI_KERNEL_EMBEDDING_MODEL', 'mxbai-embed-large')
-        logger.info(f"VectorService conectado ao Kernel: {self.base_url}")
+        # Ollama usa /api/embed (não /v1/embeddings) e parâmetro "input"
+        self._is_ollama = '11434' in self.base_url or 'ollama' in self.base_url.lower()
+        logger.info(f"VectorService conectado ao Kernel: {self.base_url} (Ollama={self._is_ollama})")
     
     def get_embedding(self, text: str) -> List[float]:
         try:
-            url = f"{self.base_url}/embeddings"
-            payload = {"model": self.model, "texts": [text.strip()]}
+            if self._is_ollama:
+                # Ollama: POST /api/embed com {"model", "input"} (não usa /v1/embeddings)
+                host = self.base_url.split('/v1')[0].rstrip('/') if '/v1' in self.base_url else self.base_url.rstrip('/').split('/api')[0].rstrip('/')
+                url = f"{host}/api/embed"
+                payload = {"model": self.model, "input": (text or '').strip() or ' '}
+            else:
+                # Gabinete AI Kernel: POST /v1/embeddings com {"model", "texts"}
+                url = f"{self.base_url}/embeddings"
+                input_key = getattr(settings, 'AI_KERNEL_EMBEDDING_INPUT_KEY', 'texts')
+                texts = [text.strip()] if text else ['']
+                payload = {"model": self.model, input_key: texts[0] if input_key == 'input' else texts}
+            
             response = requests.post(url, json=payload, timeout=15)
+            if not response.ok:
+                logger.error(f"Embeddings {response.status_code}: URL={url} response={response.text[:300]}")
             response.raise_for_status()
             
             data = response.json()
-            embedding = data['embeddings'][0]
+            # Ollama e Gabinete AI Kernel: {"embeddings": [[...]]}
+            if 'embeddings' in data:
+                embedding = data['embeddings'][0]
+            elif 'data' in data:
+                embedding = data['data'][0].get('embedding')  # Formato OpenAI
+            else:
+                raise ValueError(f"Resposta sem embeddings: {list(data.keys())}")
             
             if len(embedding) != 1024:
                 logger.warning(f"Dimensão inesperada: {len(embedding)}. Esperado: 1024")

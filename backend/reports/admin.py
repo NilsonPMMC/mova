@@ -1,22 +1,56 @@
 from django.contrib import admin
-from .models import ManifestationCategory, Manifestation, ManifestationUpdate, Attachment, SatisfactionSurvey, WorkOrder
+from .models import (
+    ManifestationCategory,
+    ServicePartner,
+    ServiceSchedule,
+    Manifestation,
+    ManifestationUpdate,
+    Attachment,
+    SatisfactionSurvey,
+    WorkOrder,
+)
 
 
 @admin.register(ManifestationCategory)
 class ManifestationCategoryAdmin(admin.ModelAdmin):
-    list_display = ('name', 'parent', 'is_active', 'sla_hours', 'created_at')
-    list_filter = ('is_active', 'parent', 'created_at')
+    list_display = ('name', 'parent', 'is_active', 'is_smart_service', 'sla_hours', 'default_sector', 'created_at')
+    list_filter = ('is_active', 'is_smart_service', 'parent', 'created_at')
     search_fields = ('name', 'description')
     prepopulated_fields = {'slug': ('name',)}
     readonly_fields = ('created_at', 'updated_at')
 
 
+@admin.register(ServicePartner)
+class ServicePartnerAdmin(admin.ModelAdmin):
+    list_display = ('name', 'address', 'is_active')
+    list_filter = ('is_active',)
+    search_fields = ('name', 'address')
+
+
+@admin.register(ServiceSchedule)
+class ServiceScheduleAdmin(admin.ModelAdmin):
+    list_display = ('partner', 'date', 'time_slot', 'total_slots', 'booked_slots', 'available_slots', 'is_active')
+    list_filter = ('partner', 'date', 'is_active')
+    search_fields = ('partner__name',)
+    raw_id_fields = ('partner',)
+
+
 @admin.register(Manifestation)
 class ManifestationAdmin(admin.ModelAdmin):
-    list_display = ('protocol', 'description_short', 'status', 'origin', 'is_anonymous', 'created_at', 'citizen')
+    list_display = (
+        'protocol',
+        'description_short',
+        'status',
+        'origin',
+        'is_anonymous',
+        'has_embedding',
+        'has_service_data',
+        'created_at',
+        'citizen',
+    )
     list_filter = ('status', 'origin', 'is_anonymous', 'category', 'created_at')
     search_fields = ('protocol', 'description', 'location_address')
-    readonly_fields = ('protocol', 'created_at', 'updated_at', 'resolved_at')
+    readonly_fields = ('protocol', 'embedding_status', 'created_at', 'updated_at', 'resolved_at')
     fieldsets = (
         ('Informações Básicas', {
             'fields': ('protocol', 'citizen', 'description', 'is_anonymous')
@@ -26,6 +60,10 @@ class ManifestationAdmin(admin.ModelAdmin):
         }),
         ('Localização', {
             'fields': ('location_address', 'latitude', 'longitude')
+        }),
+        ('Campos consumidos pela IA', {
+            'description': 'Dados preenchidos ou gerados pela análise de IA (embedding, service_data).',
+            'fields': ('embedding_status', 'service_data', 'service_schedule'),
         }),
         ('Resolução', {
             'fields': ('resolved_at', 'resolved_by')
@@ -41,6 +79,31 @@ class ManifestationAdmin(admin.ModelAdmin):
     def description_short(self, obj):
         return obj.description[:50] + '...' if len(obj.description) > 50 else obj.description
     description_short.short_description = 'Descrição'
+
+    def has_embedding(self, obj):
+        if obj.embedding is None:
+            return False
+        try:
+            return len(obj.embedding) > 0
+        except (TypeError, ValueError):
+            return False
+    has_embedding.boolean = True
+    has_embedding.short_description = 'Embedding'
+
+    def has_service_data(self, obj):
+        return bool(obj.service_data and isinstance(obj.service_data, dict) and len(obj.service_data) > 0)
+    has_service_data.boolean = True
+    has_service_data.short_description = 'Service Data'
+
+    def embedding_status(self, obj):
+        if obj.embedding is None:
+            return 'Não'
+        try:
+            dim = len(obj.embedding)
+            return f'Sim ({dim} dim)' if dim > 0 else 'Não'
+        except (TypeError, ValueError):
+            return 'Não'
+    embedding_status.short_description = 'Embedding'
 
 
 @admin.register(ManifestationUpdate)

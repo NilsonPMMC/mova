@@ -165,6 +165,8 @@ NLP_ANALYSIS_VERSION = config('NLP_ANALYSIS_VERSION', default='1.0', cast=str)
 AI_KERNEL_URL = config('AI_KERNEL_URL', default='http://192.168.10.50:8004/v1', cast=str)
 AI_KERNEL_EMBEDDING_MODEL = config('AI_KERNEL_EMBEDDING_MODEL', default='mxbai-embed-large', cast=str)
 AI_KERNEL_CHAT_MODEL = config('AI_KERNEL_CHAT_MODEL', default='llama3.2', cast=str)
+# Chave do payload: "texts" (Gabinete) ou "input" (Ollama localhost:11434)
+AI_KERNEL_EMBEDDING_INPUT_KEY = config('AI_KERNEL_EMBEDDING_INPUT_KEY', default='texts', cast=str)
 
 # Security Settings (para produção, ajustar conforme necessário)
 if not DEBUG:

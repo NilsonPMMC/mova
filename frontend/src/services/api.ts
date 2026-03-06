@@ -49,6 +49,22 @@ const apiService = {
   put: (url: string, data?: any, config?: any) => api.put(url, data, config),
   patch: (url: string, data?: any, config?: any) => api.patch(url, data, config),
   delete: (url: string, config?: any) => api.delete(url, config),
+  async getNearestPartners(lat: number, lon: number, animalType?: string) {
+    try {
+      const params = new URLSearchParams({
+        lat: lat.toString(),
+        lon: lon.toString()
+      })
+      if (animalType) {
+        params.append('animal_type', animalType)
+      }
+      const response = await api.get(`/reports/nearest-partners/?${params.toString()}`)
+      return response.data
+    } catch (error) {
+      console.error('Erro ao buscar parceiros próximos:', error)
+      return []
+    }
+  },
 }
 
 export default apiService

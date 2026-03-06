@@ -28,8 +28,63 @@
           </div>
         </div>
 
+        <!-- Erro de elegibilidade (ex: castração reprovada) -->
+        <div v-if="analysisResult?.service_data?.eligibility_error" class="bg-red-50 border border-red-200 rounded-lg p-5 mb-6 text-center">
+          <div class="flex justify-center mb-3">
+            <AlertTriangle :size="32" class="text-red-500 stroke-current" />
+          </div>
+          <h3 class="text-lg font-bold text-red-700 mb-2">Atendimento não disponível</h3>
+          <p class="text-sm text-red-600 mb-4">{{ analysisResult.service_data.eligibility_error }}</p>
+          <button
+            @click="$emit('back')"
+            type="button"
+            class="px-4 py-2 bg-red-600 text-white rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+          >
+            Voltar e editar relato
+          </button>
+        </div>
+
+        <!-- Triagem pré-aprovada (castração elegível) -->
+        <div v-else-if="analysisResult?.intent === 'SERVICE_CASTRATION'" class="bg-emerald-50 border border-emerald-200 rounded-lg p-5 mb-6 text-center">
+          <div class="flex justify-center mb-3">
+            <CheckCircle2 :size="32" class="text-emerald-500 stroke-current" />
+          </div>
+          <h3 class="text-lg font-bold text-emerald-700 mb-2">Triagem Pré-aprovada!</h3>
+          <p class="text-sm text-emerald-600 mb-4">Seu animal atende aos critérios iniciais do Programa de Castração.</p>
+          <p class="text-xs text-emerald-500 mb-4">No próximo passo, solicitaremos os documentos obrigatórios (RG e Comprovante de Residência).</p>
+
+          <!-- Formulário para preencher lacunas da IA -->
+          <div v-if="isCastrationApproved" class="mt-6 text-left border-t border-emerald-200 pt-4">
+            <p class="text-sm text-emerald-800 font-medium mb-3">Para encontrarmos a clínica ideal, confirme os dados abaixo:</p>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label class="block text-xs font-semibold text-emerald-700 mb-1">Espécie *</label>
+                <select v-model="formAnimalType" class="w-full text-sm rounded-md border border-emerald-300 focus:ring-emerald-500 focus:border-emerald-500">
+                  <option value="" disabled>Selecione</option>
+                  <option value="Cão">Cão / Cachorro</option>
+                  <option value="Gato">Gato</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-emerald-700 mb-1">Sexo *</label>
+                <select v-model="formAnimalGender" class="w-full text-sm rounded-md border border-emerald-300 focus:ring-emerald-500 focus:border-emerald-500">
+                  <option value="" disabled>Selecione</option>
+                  <option value="Macho">Macho</option>
+                  <option value="Fêmea">Fêmea</option>
+                </select>
+              </div>
+            </div>
+            <div class="bg-white p-3 rounded border border-emerald-100 mb-2">
+              <label class="flex items-start gap-2 text-sm text-emerald-800 cursor-pointer">
+                <input type="checkbox" v-model="isHealthy" class="mt-1 rounded border-emerald-400 text-emerald-600 focus:ring-emerald-500">
+                <span class="text-xs leading-tight">Declaro que o animal pesa mais de 2kg e está em boas condições de saúde (não possui restrições veterinárias, e se fêmea, não está prenha ou no cio).</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
         <!-- Resumo da Análise -->
-        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+        <div v-else class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
           <h3 class="font-semibold text-blue-900 mb-2">📋 Entendemos que é:</h3>
           <p class="text-blue-800 mb-3">
             <strong>{{ analysisResult.suggested_category_name || 'Categoria não identificada' }}</strong>
@@ -49,14 +104,14 @@
           </div>
         </div>
 
-        <p class="text-sm text-gray-600 mt-2">
+        <p v-if="!analysisResult?.service_data?.eligibility_error" class="text-sm text-gray-600 mt-2">
           Está correto? Se não, você pode adicionar uma observação abaixo.
         </p>
       </div>
     </ChatBubble>
 
-    <!-- Campo de Correção (se usuário discordar) -->
-    <div v-if="analysisResult && !isAnalyzing && !analysisError" class="ml-13 mt-4">
+    <!-- Campo de Correção e Botões (ocultos quando há erro de elegibilidade) -->
+    <div v-if="analysisResult && !isAnalyzing && !analysisError && !analysisResult?.service_data?.eligibility_error" class="ml-13 mt-4">
       <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-200 mb-4">
         <label class="block text-sm font-medium text-gray-700 mb-2">
           Adicionar observação (opcional)
@@ -72,8 +127,8 @@
       <!-- Botões de Ação -->
       <div class="flex gap-3">
         <button
-          @click="$emit('confirm')"
-          :disabled="isSubmitting"
+          @click="handleConfirm"
+          :disabled="isSubmitting || (isCastrationApproved && !isFormValid)"
           class="flex-1 px-6 py-3 bg-gov-blue text-white font-medium rounded-xl hover:bg-gov-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <span v-if="!isSubmitting">Sim, está correto. Enviar</span>
@@ -103,8 +158,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import { Loader, AlertCircle } from 'lucide-vue-next'
+import { AlertTriangle, CheckCircle2 } from '@/utils/icons'
 import ChatBubble from './ChatBubble.vue'
 import apiService from '@/services/api'
 import { useManifestationStore } from '@/stores/manifestation'
@@ -114,7 +170,7 @@ const props = defineProps<{
   isSubmitting?: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   confirm: []
   'continue-anyway': []
   back: []
@@ -123,6 +179,38 @@ defineEmits<{
 const store = useManifestationStore()
 const isAnalyzing = ref(true)
 const analysisResult = ref<any>(null)
+
+// Variáveis do Formulário de Castração
+const formAnimalType = ref('')
+const formAnimalGender = ref('')
+const isHealthy = ref(false)
+
+watch(
+  () => analysisResult.value,
+  (newVal) => {
+    if (newVal?.intent === 'SERVICE_CASTRATION' && newVal?.service_data) {
+      const type = (newVal.service_data.animal_type || '').toLowerCase()
+      if (type?.includes('cão') || type?.includes('cachorro')) formAnimalType.value = 'Cão'
+      else if (type?.includes('gato')) formAnimalType.value = 'Gato'
+
+      const gender = (newVal.service_data.animal_gender || '').toLowerCase()
+      if (gender?.includes('fêmea') || gender?.includes('femea')) formAnimalGender.value = 'Fêmea'
+      else if (gender?.includes('macho')) formAnimalGender.value = 'Macho'
+    }
+  },
+  { immediate: true }
+)
+
+const isCastrationApproved = computed(
+  () =>
+    analysisResult.value?.intent === 'SERVICE_CASTRATION' &&
+    !analysisResult.value?.service_data?.eligibility_error
+)
+
+const isFormValid = computed(() => {
+  if (!isCastrationApproved.value) return true
+  return formAnimalType.value && formAnimalGender.value && isHealthy.value
+})
 const analysisError = ref<string | null>(null)
 const correctionText = ref('')
 
@@ -163,6 +251,21 @@ async function analyzeDraft() {
   } finally {
     isAnalyzing.value = false
   }
+}
+
+function handleConfirm() {
+  if (isCastrationApproved.value) {
+    if (!isFormValid.value) {
+      alert('Por favor, preencha a espécie, o sexo e confirme as condições de saúde do animal para avançar.')
+      return
+    }
+    store.updateServiceData({
+      animal_type: formAnimalType.value,
+      animal_gender: formAnimalGender.value,
+      is_healthy_confirmed: true,
+    })
+  }
+  emit('confirm')
 }
 
 onMounted(() => {

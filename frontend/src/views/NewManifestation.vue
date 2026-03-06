@@ -107,16 +107,34 @@
         />
       </div>
 
-      <!-- Passo 7: Revisão -->
+      <!-- Passo 7: Agendamento (castração) ou Revisão (demais) -->
       <div v-if="currentStep === 7">
+        <StepSchedule v-if="isCastration" @next="nextStep" />
         <StepReview
+          v-else
           message="Por favor, revise as informações antes de enviar:"
           @submit="handleSubmit"
         />
       </div>
 
-      <!-- Passo 8: Sucesso -->
+      <!-- Passo 8: Revisão (castração) ou Sucesso (demais) -->
       <div v-if="currentStep === 8">
+        <StepReview
+          v-if="isCastration"
+          message="Por favor, revise as informações antes de enviar:"
+          @submit="handleSubmit"
+        />
+        <StepSuccess
+          v-else-if="store.submittedProtocol"
+          :protocol="store.submittedProtocol"
+          @new="handleNewManifestation"
+          @home="$router.push('/')"
+          @register-another-demand="handleRegisterAnotherDemand"
+        />
+      </div>
+
+      <!-- Passo 9: Sucesso (apenas castração) -->
+      <div v-if="currentStep === 9">
         <StepSuccess
           v-if="store.submittedProtocol"
           :protocol="store.submittedProtocol"
@@ -137,7 +155,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ArrowLeft } from 'lucide-vue-next'
 import ChatBubble from '@/components/ChatBubble.vue'
 import StepIdentification from '@/components/StepIdentification.vue'
@@ -145,12 +163,14 @@ import StepDescription from '@/components/StepDescription.vue'
 import StepAnalysis from '@/components/StepAnalysis.vue'
 import StepLocation from '@/components/StepLocation.vue'
 import StepAttachments from '@/components/StepAttachments.vue'
+import StepSchedule from '@/components/StepSchedule.vue'
 import StepReview from '@/components/StepReview.vue'
 import StepSuccess from '@/components/StepSuccess.vue'
 import { useManifestationStore } from '@/stores/manifestation'
 
 const store = useManifestationStore()
 const currentStep = ref(1)
+const isCastration = computed(() => store.draftAnalysis?.intent === 'SERVICE_CASTRATION')
 const stepAnalysisRef = ref<any>(null)
 const stepAttachmentsRef = ref<any>(null)
 
@@ -206,7 +226,7 @@ function handleAttachmentsContinue() {
 async function handleSubmit() {
   const protocol = await store.submitManifestation()
   if (protocol) {
-    currentStep.value = 8 // Passo de sucesso (agora é 8 porque adicionamos passo de anexos)
+    currentStep.value = isCastration.value ? 9 : 8
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }

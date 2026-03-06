@@ -60,16 +60,18 @@ class NLPAnalysis(TimeStampedModel):
     INTENT_SUGGESTION = 'SUGGESTION'
     INTENT_INFORMATION = 'INFORMATION'
     INTENT_DENUNCIATION = 'DENUNCIATION'
+    INTENT_SERVICE_CASTRATION = 'SERVICE_CASTRATION'
     
     INTENT_CHOICES = [
         (INTENT_COMPLAINT, 'Reclamação'),
         (INTENT_SUGGESTION, 'Sugestão'),
         (INTENT_INFORMATION, 'Dúvida/Informação'),
         (INTENT_DENUNCIATION, 'Denúncia'),
+        (INTENT_SERVICE_CASTRATION, 'Serviço - Castração'),
     ]
     
     intent = models.CharField(
-        max_length=20,
+        max_length=50,
         choices=INTENT_CHOICES,
         default=INTENT_COMPLAINT,
         verbose_name='Intenção',

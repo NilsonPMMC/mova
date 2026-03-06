@@ -25,6 +25,14 @@ export interface DraftAnalysisResult {
     urgency_level?: number
     specific_text?: string
   }>
+  service_data?: {
+    eligibility_error?: string | null
+    animal_type?: string
+    animal_gender?: string
+    animal_age?: string
+    animal_weight?: string
+    [key: string]: unknown
+  } | null
   [key: string]: unknown
 }
 
@@ -56,6 +64,10 @@ export const useManifestationStore = defineStore('manifestation', () => {
   const isSubmitting = ref<boolean>(false)
   const submittedProtocol = ref<string | null>(null)
   const error = ref<string | null>(null)
+
+  // Parceiros próximos (clínicas zoonoses)
+  const nearbyPartners = ref<any[]>([])
+  const isLoadingPartners = ref(false)
 
   // Computed (CPF, Nome e Telefone são obrigatórios)
   const canSubmit = computed(() => {
@@ -167,6 +179,16 @@ export const useManifestationStore = defineStore('manifestation', () => {
           payload.append('citizen_correction', citizenCorrection.value.trim())
         }
         
+        // service_data (dados de serviços inteligentes: castração, procuração, etc.)
+        if (draftAnalysis.value?.service_data && typeof draftAnalysis.value.service_data === 'object') {
+          payload.append('service_data', JSON.stringify(draftAnalysis.value.service_data))
+        }
+        
+        // Agendamento (vaga escolhida)
+        if (draftAnalysis.value?.service_data?.schedule_id) {
+          payload.append('service_schedule', String(draftAnalysis.value.service_data.schedule_id))
+        }
+        
         // Arquivos
         files.value.forEach((file) => {
           payload.append('files', file)
@@ -225,6 +247,15 @@ export const useManifestationStore = defineStore('manifestation', () => {
         if (citizenCorrection.value.trim()) {
           payload.citizen_correction = citizenCorrection.value.trim()
         }
+
+        // service_data (dados de serviços inteligentes: castração, procuração, etc.)
+        if (draftAnalysis.value?.service_data && typeof draftAnalysis.value.service_data === 'object') {
+          payload.service_data = draftAnalysis.value.service_data
+        }
+        // Agendamento (vaga escolhida)
+        if (draftAnalysis.value?.service_data?.schedule_id) {
+          payload.service_schedule = draftAnalysis.value.service_data.schedule_id
+        }
       }
 
       const response = await apiService.post('/reports/manifestations/', payload, config)
@@ -246,6 +277,34 @@ export const useManifestationStore = defineStore('manifestation', () => {
 
   function setDraftAnalysis(analysis: DraftAnalysisResult | null) {
     draftAnalysis.value = analysis
+  }
+
+  async function fetchNearestPartners(animalType?: string) {
+    if (latitude.value === null || longitude.value === null) return
+    isLoadingPartners.value = true
+    try {
+      const data = await apiService.getNearestPartners(
+        latitude.value,
+        longitude.value,
+        animalType
+      )
+      nearbyPartners.value = data
+    } finally {
+      isLoadingPartners.value = false
+    }
+  }
+
+  /** Mescla novos dados no service_data da análise atual (ex: Procuração Digital, docs da castração). */
+  function updateServiceData(newData: Record<string, unknown>) {
+    if (draftAnalysis.value) {
+      if (!draftAnalysis.value.service_data || typeof draftAnalysis.value.service_data !== 'object') {
+        draftAnalysis.value.service_data = {}
+      }
+      draftAnalysis.value.service_data = {
+        ...(draftAnalysis.value.service_data as Record<string, unknown>),
+        ...newData,
+      }
+    }
   }
 
   /**
@@ -280,6 +339,7 @@ export const useManifestationStore = defineStore('manifestation', () => {
     citizenPhone.value = ''
     citizenCorrection.value = ''
     draftAnalysis.value = null
+    nearbyPartners.value = []
     files.value = []
     fileDescriptions.value = []
     isSubmitting.value = false
@@ -302,6 +362,8 @@ export const useManifestationStore = defineStore('manifestation', () => {
     citizenPhone,
     citizenCorrection,
     draftAnalysis,
+    nearbyPartners,
+    isLoadingPartners,
     files,
     fileDescriptions,
     isSubmitting,
@@ -319,6 +381,8 @@ export const useManifestationStore = defineStore('manifestation', () => {
     setCitizenData,
     setCitizenCorrection,
     setDraftAnalysis,
+    fetchNearestPartners,
+    updateServiceData,
     setFiles,
     submitManifestation,
     startNewDemandFromCrossSell,

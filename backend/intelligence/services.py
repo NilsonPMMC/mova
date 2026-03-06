@@ -134,27 +134,38 @@ class LLMService:
                 else "Infraestrutura, Iluminação, Saúde, Trânsito, Outros"
             )
             
-            # Preparar o prompt do sistema (múltiplas demandas por relato)
-            system_message = f"""Você é um Analista de Ouvidoria da Prefeitura. Sua tarefa é identificar TODOS os problemas distintos em um único relato do cidadão (ex.: "rua sem luz e com muitos assaltos" = duas demandas).
+            # Preparar o prompt do sistema (regras gerais + triagem ativa de castração)
+            system_message = f"""
+Você é um Analista de Ouvidoria e Serviços da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos e realizar triagem de serviços.
 
-Retorne APENAS um objeto JSON válido. Não inclua markdown ```json``` ou texto adicional.
+Responda APENAS com um JSON válido, contendo EXATAMENTE as seguintes chaves:
+- 'intent': Use "COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION", ou "SERVICE_CASTRATION" (se o assunto for castração de cães/gatos).
+- 'macro_category': APENAS um destes valores: [{categorias_str}]. Se for castração, use "Saúde Animal" ou a categoria equivalente da lista.
+- 'category_detail': O serviço específico (ex: "Castração", "Tapa-buraco").
+- 'urgency_level': 1 a 5 (Castração é sempre 1 ou 2).
+- 'sentiment': float de -1.0 a 1.0.
+- 'summary': Resumo de 5 a 10 palavras.
+- 'keywords': Lista de 3 a 5 palavras.
+- 'service_data': Se a intent for "SERVICE_CASTRATION", retorne um objeto JSON com os dados extraídos do texto (se mencionados):
+    {{
+      "animal_type": "cão" ou "gato",
+      "animal_gender": "macho" ou "fêmea",
+      "animal_age": "idade extraída",
+      "animal_weight": "peso extraído",
+      "medical_condition": "condição médica mencionada",
+      "eligibility_error": "MENSAGEM DE ERRO (se reprovar) ou null (se aprovado/incompleto)"
+    }}
+  Se não for castração, retorne null.
 
-O JSON deve conter exatamente estes campos:
-- "has_multiple_demands": booleano (true se houver mais de um problema distinto que exija secretarias diferentes, false caso contrário).
-- "demands": lista de objetos. Cada objeto representa um problema e DEVE conter:
-    * "macro_category": APENAS UM destes valores: [{categorias_str}].
-    * "category_detail": serviço específico (ex: "Tapa-buraco", "Ronda Policial").
-    * "urgency_level": inteiro de 1 a 5 (1=Dúvida, 3=Incômodo, 5=Risco à vida).
-    * "specific_text": o trecho exato do relato do cidadão que justifica este problema.
-- "sentiment_score": float de -1.0 a 1.0.
-- "intent": string (COMPLAINT, SUGGESTION, INFORMATION, DENUNCIATION).
-- "global_summary": resumo de todo o relato em uma frase.
-- "global_keywords": lista de 3 a 5 palavras-chave gerais.
+REGRAS DE ELEGIBILIDADE PARA CASTRAÇÃO (Preencha 'eligibility_error' se o animal infringir alguma delas):
+1. Cães e Gatos machos devem ter a partir de 6 meses. Fêmeas a partir de 4 meses.
+2. Idade máxima: 10 anos.
+3. Peso mínimo: 2 kg.
+4. Fêmeas não podem estar: prenhas, amamentando ou no cio.
+5. Animais não podem ter cardiopatia, epilepsia, doença respiratória ou restrição veterinária.
+Se reprovado, o 'eligibility_error' deve ser uma frase amigável explicando o motivo (Ex: "Infelizmente, animais acima de 10 anos não são contemplados pelo programa."). Se faltarem dados para julgar, deixe null.
 
-IMPORTANTE:
-- Retorne APENAS o JSON válido, sem explicações, sem markdown.
-- Use o nome EXATO de uma categoria da lista [{categorias_str}] em macro_category dentro de cada item de demands.
-- Se houver um único problema, demands terá um único elemento. Se houver vários (ex.: iluminação + segurança), liste cada um em demands."""
+Retorne APENAS o JSON válido, sem markdown ou texto adicional."""
             
             # Preparar o prompt do usuário com o relato
             user_message = text
@@ -199,32 +210,35 @@ IMPORTANTE:
                 )
                 return None
             
-            # Extrair os dados estruturados (formato com múltiplas demandas)
-            sentiment_score = float(ai_data.get('sentiment_score', 0.0))
+            # Extrair os dados estruturados (formato flat + service_data para castração)
+            sentiment_score = float(ai_data.get('sentiment', ai_data.get('sentiment_score', 0.0)))
             intent = ai_data.get('intent', 'COMPLAINT')
-            global_summary = ai_data.get('global_summary', ai_data.get('summary', ''))
-            global_keywords = ai_data.get('global_keywords', ai_data.get('keywords', []))
+            global_summary = ai_data.get('summary', ai_data.get('global_summary', ''))
+            global_keywords = ai_data.get('keywords', ai_data.get('global_keywords', []))
+            service_data = ai_data.get('service_data', None)
 
+            # Formato novo: campos no nível raiz; fallback para demands (compatibilidade)
             demands = ai_data.get('demands', [])
-            has_multiple_demands = ai_data.get('has_multiple_demands', len(demands) > 1)
-
-            # Fallback de segurança se a IA não retornar demands
-            if not demands:
+            if demands:
+                primary_demand = demands[0]
+                urgency_level = int(primary_demand.get('urgency_level', 3))
+                macro_category = primary_demand.get('macro_category', '')
+                category_detail = primary_demand.get('category_detail', '')
+                has_multiple_demands = ai_data.get('has_multiple_demands', len(demands) > 1)
+            else:
+                urgency_level = int(ai_data.get('urgency_level', 3))
+                macro_category = ai_data.get('macro_category', '')
+                category_detail = ai_data.get('category_detail', '')
+                has_multiple_demands = False
                 demands = [{
-                    "macro_category": "Outros",
-                    "category_detail": "Não classificado",
-                    "urgency_level": 3,
+                    "macro_category": macro_category or "Outros",
+                    "category_detail": category_detail or "Não classificado",
+                    "urgency_level": urgency_level,
                     "specific_text": text,
                 }]
 
-            # A demanda primária será sempre a primeira da lista
-            primary_demand = demands[0]
-            urgency_level = int(primary_demand.get('urgency_level', 3))
-            macro_category = primary_demand.get('macro_category', '')
-            category_detail = primary_demand.get('category_detail', '')
-
-            # Validar intent
-            valid_intents = ['COMPLAINT', 'SUGGESTION', 'INFORMATION', 'DENUNCIATION']
+            # Validar intent (inclui SERVICE_CASTRATION para triagem ativa)
+            valid_intents = ["COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION", "SERVICE_CASTRATION"]
             if intent not in valid_intents:
                 intent = 'COMPLAINT'  # Default seguro
 
@@ -254,7 +268,7 @@ IMPORTANTE:
                     'total_tokens': getattr(response.usage, 'total_tokens', 0),
                 }
             
-            # Preparar resultado (demanda primária + lista de todas as demandas)
+            # Preparar resultado (demanda primária + service_data para castração)
             result = {
                 'sentiment_score': sentiment_score,
                 'urgency_level': urgency_level,
@@ -267,6 +281,7 @@ IMPORTANTE:
                 'summary': global_summary,
                 'has_multiple_demands': has_multiple_demands,
                 'all_demands': demands,
+                'service_data': service_data,
                 'raw_ai_response': {
                     'model': response.model,
                     'api_base': api_base,
@@ -309,6 +324,11 @@ IMPORTANTE:
                 if category_detail and hasattr(manifestation_instance, "category_detail"):
                     manifestation_instance.category_detail = category_detail
                     manifestation_instance.save(update_fields=["category_detail"])
+
+                # Persistir service_data (ex: dados da castração) quando o campo existir
+                if service_data and hasattr(manifestation_instance, "service_data"):
+                    manifestation_instance.service_data = service_data
+                    manifestation_instance.save(update_fields=["service_data"])
 
                 logger.info(
                     f"Análise de IA concluída para manifestação {manifestation_instance.protocol}. "

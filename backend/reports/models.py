@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import F
 from django.conf import settings
 from django.utils.text import slugify
 from pgvector.django import VectorField
@@ -63,6 +64,56 @@ class ManifestationCategory(TimeStampedModel):
             path.insert(0, parent.name)
             parent = parent.parent
         return ' > '.join(path)
+
+
+class ServicePartner(models.Model):
+    """Clínicas ou parceiros que executam serviços terceirizados (ex: Zoonoses)"""
+    name = models.CharField(max_length=255, verbose_name="Nome da Clínica/Parceiro")
+    address = models.CharField(max_length=255, verbose_name="Endereço Completo")
+    latitude = models.DecimalField(max_digits=10, decimal_places=8, null=True, blank=True)
+    longitude = models.DecimalField(max_digits=10, decimal_places=8, null=True, blank=True)
+    accepted_types = models.JSONField(
+        default=list,
+        blank=True,
+        help_text='Ex: ["Cão Macho", "Cão Fêmea", "Gato Macho", "Gato Fêmea"]'
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'service_partners'
+        verbose_name = 'Parceiro de Serviço'
+        verbose_name_plural = 'Parceiros de Serviço'
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
+
+class ServiceSchedule(models.Model):
+    """Agenda de vagas disponíveis por parceiro"""
+    partner = models.ForeignKey(
+        ServicePartner,
+        on_delete=models.CASCADE,
+        related_name='schedules'
+    )
+    date = models.DateField(verbose_name="Data do Atendimento")
+    time_slot = models.CharField(max_length=50, verbose_name="Horário/Período (Ex: 08:00 - 12:00)")
+    total_slots = models.IntegerField(default=10, verbose_name="Vagas Totais")
+    booked_slots = models.IntegerField(default=0, verbose_name="Vagas Ocupadas")
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'service_schedules'
+        verbose_name = 'Agenda de Serviço'
+        verbose_name_plural = 'Agendas de Serviço'
+        ordering = ['date', 'time_slot']
+
+    @property
+    def available_slots(self):
+        return max(0, self.total_slots - self.booked_slots)
+
+    def __str__(self):
+        return f"{self.partner.name} - {self.date} ({self.time_slot})"
 
 
 class Manifestation(TimeStampedModel):
@@ -142,6 +193,14 @@ class Manifestation(TimeStampedModel):
         null=True,
         blank=True,
         help_text='Armazena dados flexíveis de formulários específicos (ex: dados do animal para castração, agenda, etc.)'
+    )
+    service_schedule = models.ForeignKey(
+        ServiceSchedule,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='manifestations',
+        verbose_name='Agendamento Vinculado'
     )
     latitude = models.DecimalField(
         max_digits=10,
@@ -256,6 +315,8 @@ class Manifestation(TimeStampedModel):
         return f"OUV-{date_str}-{random_suffix}"
 
     def save(self, *args, **kwargs):
+        is_new = self.pk is None
+
         if not self.protocol:
             # Garantir unicidade do protocolo
             while True:
@@ -264,6 +325,11 @@ class Manifestation(TimeStampedModel):
                     self.protocol = protocol
                     break
         super().save(*args, **kwargs)
+
+        if is_new and self.service_schedule_id:
+            ServiceSchedule.objects.filter(pk=self.service_schedule_id).update(
+                booked_slots=F('booked_slots') + 1
+            )
 
 
 class ManifestationUpdate(TimeStampedModel):

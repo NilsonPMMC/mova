@@ -1,11 +1,13 @@
 import logging
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
+from rest_framework.views import APIView
 from rest_framework.response import Response
 from django.db.models import Q
 from pgvector.django import L2Distance, CosineDistance
 from core.services.vector_service import VectorService
-from .models import Manifestation, ManifestationCategory, ManifestationUpdate, Attachment, SatisfactionSurvey, WorkOrder
+from intelligence.services import haversine_distance_meters
+from .models import Manifestation, ManifestationCategory, ManifestationUpdate, Attachment, SatisfactionSurvey, WorkOrder, ServicePartner
 from intelligence.models import NLPAnalysis
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,7 @@ from .serializers import (
     SatisfactionSurveySerializer,
     WorkOrderSerializer,
     WorkOrderCreateSerializer,
+    ServicePartnerSerializer,
 )
 
 
@@ -732,6 +735,7 @@ class ManifestationViewSet(viewsets.ModelViewSet):
             'keywords': analysis_result.get('keywords', []),
             'has_multiple_demands': analysis_result.get('has_multiple_demands', False),
             'all_demands': analysis_result.get('all_demands', []),
+            'service_data': analysis_result.get('service_data'),
         }
         
         # Incluir dados da categoria se encontrada
@@ -806,3 +810,48 @@ class WorkOrderViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         serializer.save()
+
+
+class NearestPartnersView(APIView):
+    """
+    Retorna parceiros ordenados pela distância e filtrados por tipo de animal.
+    Ex: /api/v1/reports/nearest-partners/?lat=-23.5&lon=-46.2&animal_type=Gato Fêmea
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        lat = request.query_params.get('lat')
+        lon = request.query_params.get('lon')
+        animal_type = request.query_params.get('animal_type')
+
+        if not lat or not lon:
+            return Response(
+                {"detail": "Latitude e longitude são obrigatórias."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        partners = ServicePartner.objects.filter(is_active=True).prefetch_related('schedules')
+        results = []
+
+        for partner in partners:
+            if animal_type and partner.accepted_types:
+                accepted_lower = [str(t).lower().strip() for t in partner.accepted_types]
+                if animal_type.lower().strip() not in accepted_lower:
+                    continue
+
+            distance = float('inf')
+            if partner.latitude and partner.longitude:
+                try:
+                    distance = haversine_distance_meters(
+                        float(lat), float(lon),
+                        float(partner.latitude), float(partner.longitude)
+                    )
+                except (TypeError, ValueError):
+                    pass
+
+            partner.distance_meters = distance
+            results.append(partner)
+
+        results.sort(key=lambda x: x.distance_meters)
+        serializer = ServicePartnerSerializer(results, many=True)
+        return Response(serializer.data)

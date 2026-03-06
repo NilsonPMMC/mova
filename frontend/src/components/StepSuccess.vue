@@ -394,16 +394,21 @@ onMounted(() => {
   // Buscar imediatamente
   fetchManifestation()
   
-  // Polling a cada 2 segundos (máximo 30 tentativas = 1 minuto)
-  let attempts = 0
-  const maxAttempts = 30
+  // Polling a cada 2 segundos (Circuit Breaker: máximo 15 tentativas = 30 segundos)
+  let pollAttempts = 0
+  const MAX_POLL_ATTEMPTS = 15
   
   pollingInterval.value = window.setInterval(() => {
-    attempts++
-    if (attempts >= maxAttempts || !isAnalyzing.value) {
+    pollAttempts++
+    
+    // Trava de segurança: parar se status mudou (nlp já disponível) ou timeout
+    if (pollAttempts > MAX_POLL_ATTEMPTS || !isAnalyzing.value) {
       if (pollingInterval.value) {
         clearInterval(pollingInterval.value)
         pollingInterval.value = null
+      }
+      if (pollAttempts > MAX_POLL_ATTEMPTS) {
+        isAnalyzing.value = false
       }
       return
     }
