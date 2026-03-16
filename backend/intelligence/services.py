@@ -248,6 +248,30 @@ Ex: "Infelizmente, animais acima de 10 anos não são contemplados."
             has_multiple_demands = ai_data.get('has_multiple_demands', has_multiple_demands)
             all_demands = ai_data.get('all_demands', demands)
 
+            # Garantir que castração apareça como demanda explícita quando a intent for SERVICE_CASTRATION,
+            # mesmo que o modelo não a liste em all_demands.
+            if intent == "SERVICE_CASTRATION":
+                castration_present = False
+                for d in all_demands:
+                    try:
+                        detail = str((d or {}).get("category_detail", "")).lower()
+                        macro = str((d or {}).get("macro_category", "")).lower()
+                    except Exception:
+                        detail = ""
+                        macro = ""
+                    if "castra" in detail or "castra" in macro:
+                        castration_present = True
+                        break
+
+                if not castration_present:
+                    # Adiciona uma demanda sintética de castração sem depender do modelo
+                    all_demands.append({
+                        "macro_category": macro_category or "Saúde Animal",
+                        "category_detail": category_detail or "Castração",
+                        "urgency_level": urgency_level,
+                        "specific_text": text,
+                    })
+
             # Validar intent (inclui SERVICE_CASTRATION para triagem ativa)
             valid_intents = ["COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION", "SERVICE_CASTRATION"]
             if intent not in valid_intents:
