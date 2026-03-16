@@ -178,27 +178,30 @@
         </div>
       </div>
 
-      <!-- Cross-sell: outras demandas detectadas pela IA -->
-      <div v-if="pendingDemands.length > 0" class="mt-4 space-y-3">
-        <p class="text-sm font-medium text-gray-700">Outros problemas identificados no seu relato</p>
-        <div
-          v-for="(demand, index) in pendingDemands"
-          :key="index"
-          class="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm"
-        >
-          <p class="text-sm text-gray-800 mb-3">
-            <span class="inline-block mr-1" aria-hidden="true">💡</span>
-            Notamos que você também relatou: <strong>{{ demand.category_detail || 'Outro' }}</strong>
-            <span v-if="demand.macro_category" class="text-gray-600">({{ demand.macro_category }})</span>.
-            Deseja registrar este problema agora aproveitando seus dados de localização?
-          </p>
-          <button
-            type="button"
-            @click="registerNewDemand(demand)"
-            class="w-full px-4 py-2 bg-gov-blue text-white text-sm font-medium rounded-lg hover:bg-gov-dark transition-colors"
-          >
-            Registrar Nova Demanda
-          </button>
+      <!-- Fila de demandas pendentes (Cross-sell) -->
+      <div v-if="store.pendingDemands && store.pendingDemands.length > 0" class="mt-8 border-t border-slate-200 pt-6 animate-fade-in text-left">
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-5">
+          <h3 class="text-lg font-bold text-blue-800 mb-2">💡 Notamos outros relatos no seu texto</h3>
+          <p class="text-sm text-blue-700 mb-4">Para agilizar, já separamos as outras solicitações. Deseja registrá-las agora?</p>
+          
+          <div class="space-y-3">
+            <div 
+              v-for="(demand, index) in store.pendingDemands" 
+              :key="index"
+              class="bg-white border border-blue-100 p-4 rounded flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shadow-sm"
+            >
+              <div>
+                <p class="font-semibold text-slate-800 text-sm">{{ demand.category_detail }}</p>
+                <p class="text-xs text-slate-500 italic mt-1 line-clamp-2">"{{ demand.specific_text }}"</p>
+              </div>
+              <button 
+                @click="handleStartPending(index)"
+                class="shrink-0 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
+              >
+                Registrar este
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -237,6 +240,7 @@ const emit = defineEmits<{
   new: []
   home: []
   'register-another-demand': []
+  'start-next': []
 }>()
 
 const store = useManifestationStore()
@@ -244,16 +248,11 @@ const manifestationData = ref<any>(null)
 const isAnalyzing = ref(true)
 const pollingInterval = ref<number | null>(null)
 
-/** Demandas adicionais detectadas pela IA (índice 1 em diante); a primeira já gerou o protocolo */
-const pendingDemands = computed(() => {
-  const all = store.draftAnalysis?.all_demands
-  if (!Array.isArray(all) || all.length <= 1) return []
-  return all.slice(1)
-})
-
-function registerNewDemand(demand: { specific_text?: string }) {
-  store.startNewDemandFromCrossSell(demand)
+const handleStartPending = (index: number) => {
+  store.startNextPendingDemand(index)
+  // Mantém compatibilidade com o evento antigo e emite também o novo fluxo
   emit('register-another-demand')
+  emit('start-next')
 }
 
 const CheckCircleIcon = CheckCircle

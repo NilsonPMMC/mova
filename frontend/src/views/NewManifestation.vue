@@ -130,6 +130,7 @@
           @new="handleNewManifestation"
           @home="$router.push('/')"
           @register-another-demand="handleRegisterAnotherDemand"
+          @start-next="handleStartNextPending"
         />
       </div>
 
@@ -141,6 +142,7 @@
           @new="handleNewManifestation"
           @home="$router.push('/')"
           @register-another-demand="handleRegisterAnotherDemand"
+          @start-next="handleStartNextPending"
         />
       </div>
 
@@ -239,6 +241,12 @@ function handleNewManifestation() {
 
 function handleRegisterAnotherDemand() {
   currentStep.value = 3
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function handleStartNextPending() {
+  // Pula etapa de descrição, pois o texto já veio da IA
+  currentStep.value = 4
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
 </script>

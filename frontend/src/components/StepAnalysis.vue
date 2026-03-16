@@ -83,24 +83,75 @@
           </div>
         </div>
 
-        <!-- Resumo da Análise -->
+        <!-- Resumo da Análise (com lista de problemas quando houver múltiplas demandas) -->
         <div v-else class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
-          <h3 class="font-semibold text-blue-900 mb-2">📋 Entendemos que é:</h3>
-          <p class="text-blue-800 mb-3">
-            <strong>{{ analysisResult.suggested_category_name || 'Categoria não identificada' }}</strong>
-          </p>
-          
-          <div v-if="analysisResult.summary" class="text-sm text-blue-700 mb-3">
-            <p class="font-medium mb-1">Resumo:</p>
-            <p class="italic">"{{ analysisResult.summary }}"</p>
+          <h3 class="font-semibold text-blue-900 mb-2">📋 Identificamos os seguintes relatos:</h3>
+
+          <div v-if="demandsToShow.length > 0" class="space-y-3">
+            <p class="text-xs text-blue-700">
+              O <strong>primeiro</strong> item será registrado agora. Os demais ficarão disponíveis para você registrar em seguida, sem precisar redigitar.
+            </p>
+            <div
+              v-for="(d, idx) in demandsToShow"
+              :key="idx"
+              class="bg-white border border-blue-100 rounded-lg p-3"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex items-start gap-2">
+                    <span
+                      v-if="idx === 0"
+                      class="mt-0.5 inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-800"
+                    >
+                      Principal (agora)
+                    </span>
+                    <span
+                      v-else
+                      class="mt-0.5 inline-flex items-center rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800"
+                    >
+                      Pendente (depois)
+                    </span>
+
+                    <p class="text-sm font-semibold text-slate-800">
+                      {{ d.category_detail || 'Não especificado' }}
+                      <span v-if="d.macro_category" class="text-xs font-medium text-slate-500">
+                        ({{ d.macro_category }})
+                      </span>
+                    </p>
+                  </div>
+                  <p v-if="d.specific_text" class="text-xs text-slate-500 italic mt-1 line-clamp-2">
+                    "{{ d.specific_text }}"
+                  </p>
+                </div>
+                <div class="shrink-0 text-right text-xs text-blue-700">
+                  <div>
+                    <span class="font-semibold">Urgência:</span>
+                    {{ formatUrgencyLabel(d.urgency_level) }}
+                  </div>
+                  <div v-if="d.sla_hours">
+                    <span class="font-semibold">Prazo:</span>
+                    {{ formatSLA(d.sla_hours) }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div class="flex gap-4 text-xs text-blue-600">
-            <span>Urgência: {{ analysisResult.urgency_label }}</span>
-            <span>•</span>
-            <span v-if="analysisResult.sla_hours">
-              Prazo estimado: {{ formatSLA(analysisResult.sla_hours) }}
-            </span>
+          <div v-else>
+            <p class="text-blue-800 mb-3">
+              <strong>{{ analysisResult.suggested_category_name || 'Categoria não identificada' }}</strong>
+            </p>
+            <div v-if="analysisResult.summary" class="text-sm text-blue-700 mb-3">
+              <p class="font-medium mb-1">Resumo:</p>
+              <p class="italic">"{{ analysisResult.summary }}"</p>
+            </div>
+            <div class="flex gap-4 text-xs text-blue-600">
+              <span>Urgência: {{ analysisResult.urgency_label }}</span>
+              <span>•</span>
+              <span v-if="analysisResult.sla_hours">
+                Prazo estimado: {{ formatSLA(analysisResult.sla_hours) }}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -227,6 +278,25 @@ function formatSLA(hours: number): string {
     return `${days} dias`
   }
 }
+
+function formatUrgencyLabel(level: number): string {
+  const labels: Record<number, string> = {
+    1: 'Muito Baixa',
+    2: 'Baixa',
+    3: 'Média',
+    4: 'Alta',
+    5: 'Crítica',
+  }
+  return labels[level] || 'Média'
+}
+
+const demandsToShow = computed(() => {
+  const enriched = analysisResult.value?.all_demands_enriched
+  if (Array.isArray(enriched) && enriched.length > 0) return enriched
+  const all = analysisResult.value?.all_demands
+  if (Array.isArray(all) && all.length > 0) return all
+  return []
+})
 
 async function analyzeDraft() {
   if (!props.description.trim()) {

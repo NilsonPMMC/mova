@@ -715,6 +715,34 @@ class ManifestationViewSet(viewsets.ModelViewSet):
             )
         
         # Preparar resposta formatada (inclui múltiplas demandas para cross-sell no frontend)
+        # Enriquecer all_demands com SLA por demanda (quando possível)
+        raw_all_demands = analysis_result.get('all_demands', []) or []
+        enriched_all_demands = []
+        for d in raw_all_demands:
+            try:
+                macro = (d or {}).get('macro_category') if isinstance(d, dict) else None
+                detail = (d or {}).get('category_detail') if isinstance(d, dict) else None
+                urgency = (d or {}).get('urgency_level') if isinstance(d, dict) else None
+                specific_text = (d or {}).get('specific_text') if isinstance(d, dict) else None
+
+                cat = None
+                if macro:
+                    cat = ManifestationCategory.objects.filter(
+                        name__iexact=str(macro).strip(),
+                        is_active=True,
+                    ).first()
+
+                enriched_all_demands.append({
+                    'macro_category': str(macro).strip() if macro else '',
+                    'category_detail': str(detail).strip() if detail else '',
+                    'specific_text': str(specific_text).strip() if specific_text else '',
+                    'urgency_level': urgency if isinstance(urgency, int) else analysis_result.get('urgency_level', 3),
+                    'sla_hours': getattr(cat, 'sla_hours', None),
+                })
+            except Exception:
+                # Nunca quebrar analyze_draft por enriquecimento
+                continue
+
         response_data = {
             'summary': analysis_result.get('summary', ''),
             'intent': analysis_result.get('intent', 'COMPLAINT'),
@@ -735,6 +763,7 @@ class ManifestationViewSet(viewsets.ModelViewSet):
             'keywords': analysis_result.get('keywords', []),
             'has_multiple_demands': analysis_result.get('has_multiple_demands', False),
             'all_demands': analysis_result.get('all_demands', []),
+            'all_demands_enriched': enriched_all_demands,
             'service_data': analysis_result.get('service_data'),
         }
         

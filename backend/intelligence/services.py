@@ -134,38 +134,38 @@ class LLMService:
                 else "Infraestrutura, Iluminação, Saúde, Trânsito, Outros"
             )
             
-            # Preparar o prompt do sistema (regras gerais + triagem ativa de castração)
+            # Preparar o prompt do sistema (inclui múltiplas demandas e triagem de castração)
             system_message = f"""
-Você é um Analista de Ouvidoria e Serviços da Prefeitura. Sua tarefa é categorizar manifestações de cidadãos e realizar triagem de serviços.
+Você é um Analista Sênior de Ouvidoria e Serviços Públicos. Sua tarefa é categorizar manifestações de cidadãos.
 
 Responda APENAS com um JSON válido, contendo EXATAMENTE as seguintes chaves:
-- 'intent': Use "COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION", ou "SERVICE_CASTRATION" (se o assunto for castração de cães/gatos).
-- 'macro_category': APENAS um destes valores: [{categorias_str}]. Se for castração, use "Saúde Animal" ou a categoria equivalente da lista.
+- 'intent': Use "COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION", ou "SERVICE_CASTRATION" (para castração de cães/gatos).
+- 'macro_category': APENAS um destes valores: [{categorias_str}].
 - 'category_detail': O serviço específico (ex: "Castração", "Tapa-buraco").
-- 'urgency_level': 1 a 5 (Castração é sempre 1 ou 2).
-- 'sentiment': float de -1.0 a 1.0.
+- 'urgency_level': Inteiro de 1 a 5.
+- 'sentiment': Float de -1.0 a 1.0.
 - 'summary': Resumo de 5 a 10 palavras.
 - 'keywords': Lista de 3 a 5 palavras.
-- 'service_data': Se a intent for "SERVICE_CASTRATION", retorne um objeto JSON com os dados extraídos do texto (se mencionados):
+- 'has_multiple_demands': booleano (true se o cidadão relatar mais de um problema físico ou serviço distinto no mesmo texto).
+- 'all_demands': Lista de objetos com os problemas encontrados. Cada objeto deve ter: {{"macro_category": "...", "category_detail": "...", "specific_text": "trecho exato do cidadão"}}. Se houver apenas um problema, retorne a lista com 1 objeto.
+- 'service_data': Se a intent for "SERVICE_CASTRATION", retorne:
     {{
       "animal_type": "cão" ou "gato",
       "animal_gender": "macho" ou "fêmea",
       "animal_age": "idade extraída",
       "animal_weight": "peso extraído",
-      "medical_condition": "condição médica mencionada",
+      "medical_condition": "condição mencionada",
       "eligibility_error": "MENSAGEM DE ERRO (se reprovar) ou null (se aprovado/incompleto)"
     }}
   Se não for castração, retorne null.
 
-REGRAS DE ELEGIBILIDADE PARA CASTRAÇÃO (Preencha 'eligibility_error' se o animal infringir alguma delas):
-1. Cães e Gatos machos devem ter a partir de 6 meses. Fêmeas a partir de 4 meses.
-2. Idade máxima: 10 anos.
-3. Peso mínimo: 2 kg.
-4. Fêmeas não podem estar: prenhas, amamentando ou no cio.
-5. Animais não podem ter cardiopatia, epilepsia, doença respiratória ou restrição veterinária.
-Se reprovado, o 'eligibility_error' deve ser uma frase amigável explicando o motivo (Ex: "Infelizmente, animais acima de 10 anos não são contemplados pelo programa."). Se faltarem dados para julgar, deixe null.
-
-Retorne APENAS o JSON válido, sem markdown ou texto adicional."""
+REGRAS DE CASTRAÇÃO (Preencha 'eligibility_error' se reprovar):
+1. Cães/Gatos machos a partir de 6 meses. Fêmeas a partir de 4 meses. Máximo: 10 anos.
+2. Peso mínimo: 2 kg.
+3. Fêmeas não podem estar prenhas, amamentando ou no cio.
+4. Sem doenças graves (cardiopatia, etc).
+Ex: "Infelizmente, animais acima de 10 anos não são contemplados."
+"""
             
             # Preparar o prompt do usuário com o relato
             user_message = text
@@ -217,6 +217,13 @@ Retorne APENAS o JSON válido, sem markdown ou texto adicional."""
             global_keywords = ai_data.get('keywords', ai_data.get('global_keywords', []))
             service_data = ai_data.get('service_data', None)
 
+            # Castração: "eligibility_error" só deve existir se REPROVAR.
+            # Alguns modelos retornam frases de "dados insuficientes" como erro; tratamos como incompleto (null).
+            if intent == "SERVICE_CASTRATION" and isinstance(service_data, dict):
+                eligibility_error = service_data.get("eligibility_error")
+                if isinstance(eligibility_error, str) and re.search(r"insuficient", eligibility_error, re.IGNORECASE):
+                    service_data["eligibility_error"] = None
+
             # Formato novo: campos no nível raiz; fallback para demands (compatibilidade)
             demands = ai_data.get('demands', [])
             if demands:
@@ -224,7 +231,7 @@ Retorne APENAS o JSON válido, sem markdown ou texto adicional."""
                 urgency_level = int(primary_demand.get('urgency_level', 3))
                 macro_category = primary_demand.get('macro_category', '')
                 category_detail = primary_demand.get('category_detail', '')
-                has_multiple_demands = ai_data.get('has_multiple_demands', len(demands) > 1)
+                has_multiple_demands = len(demands) > 1
             else:
                 urgency_level = int(ai_data.get('urgency_level', 3))
                 macro_category = ai_data.get('macro_category', '')
@@ -236,6 +243,10 @@ Retorne APENAS o JSON válido, sem markdown ou texto adicional."""
                     "urgency_level": urgency_level,
                     "specific_text": text,
                 }]
+
+            # Permitir que o modelo retorne explicitamente múltiplas demandas no novo formato
+            has_multiple_demands = ai_data.get('has_multiple_demands', has_multiple_demands)
+            all_demands = ai_data.get('all_demands', demands)
 
             # Validar intent (inclui SERVICE_CASTRATION para triagem ativa)
             valid_intents = ["COMPLAINT", "SUGGESTION", "INFORMATION", "DENUNCIATION", "SERVICE_CASTRATION"]
@@ -280,7 +291,7 @@ Retorne APENAS o JSON válido, sem markdown ou texto adicional."""
                 'keywords': global_keywords,
                 'summary': global_summary,
                 'has_multiple_demands': has_multiple_demands,
-                'all_demands': demands,
+                'all_demands': all_demands,
                 'service_data': service_data,
                 'raw_ai_response': {
                     'model': response.model,

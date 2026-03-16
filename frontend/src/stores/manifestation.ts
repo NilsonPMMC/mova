@@ -55,6 +55,9 @@ export const useManifestationStore = defineStore('manifestation', () => {
   
   // Análise prévia da IA (inclui has_multiple_demands e all_demands para cross-sell)
   const draftAnalysis = ref<DraftAnalysisResult | null>(null)
+
+  // Fila de demandas extras identificadas pela IA
+  const pendingDemands = ref<Array<{ macro_category: string; category_detail: string; specific_text: string }>>([])
   
   // Anexos/Arquivos
   const files = ref<File[]>([])
@@ -277,6 +280,21 @@ export const useManifestationStore = defineStore('manifestation', () => {
 
   function setDraftAnalysis(analysis: DraftAnalysisResult | null) {
     draftAnalysis.value = analysis
+
+    // Popular fila de demandas extras (cross-sell) apenas se ainda não houver fila
+    if (analysis?.has_multiple_demands && analysis?.all_demands) {
+      if (pendingDemands.value.length === 0) {
+        // A 1ª demanda (index 0) é a principal que gerou o protocolo
+        // As demais vão para fila, preservando a ordem do LLM
+        pendingDemands.value = (analysis.all_demands as any[])
+          .slice(1)
+          .map((d: any) => ({
+            macro_category: d.macro_category || '',
+            category_detail: d.category_detail || '',
+            specific_text: d.specific_text || description.value,
+          }))
+      }
+    }
   }
 
   async function fetchNearestPartners(animalType?: string) {
@@ -325,26 +343,44 @@ export const useManifestationStore = defineStore('manifestation', () => {
       : [...descriptions, ...new Array(filesList.length - descriptions.length).fill('')]
   }
 
-  function reset() {
+  function reset(keepPending = false) {
     description.value = ''
-    locationAddress.value = ''
-    latitude.value = null
-    longitude.value = null
-    isAnonymous.value = false
-    origin.value = 'web'
-    category.value = null
-    citizenName.value = ''
-    citizenEmail.value = ''
-    citizenCpf.value = ''
-    citizenPhone.value = ''
     citizenCorrection.value = ''
     draftAnalysis.value = null
+    // Só limpa a fila se não for um fluxo de continuação
+    if (!keepPending) {
+      pendingDemands.value = []
+      locationAddress.value = ''
+      latitude.value = null
+      longitude.value = null
+      isAnonymous.value = false
+      origin.value = 'web'
+      category.value = null
+      citizenName.value = ''
+      citizenEmail.value = ''
+      citizenCpf.value = ''
+      citizenPhone.value = ''
+    }
     nearbyPartners.value = []
     files.value = []
     fileDescriptions.value = []
     isSubmitting.value = false
     submittedProtocol.value = null
     error.value = null
+  }
+
+  function startNextPendingDemand(index: number) {
+    const demand = pendingDemands.value[index]
+    if (!demand) return
+
+    // Limpa a store mantendo a fila
+    reset(true)
+
+    // Remove o item da fila (pois ele será processado agora)
+    pendingDemands.value.splice(index, 1)
+
+    // Pré-preenche o novo rascunho com o texto específico daquela demanda
+    description.value = demand.specific_text
   }
 
   return {
@@ -362,6 +398,7 @@ export const useManifestationStore = defineStore('manifestation', () => {
     citizenPhone,
     citizenCorrection,
     draftAnalysis,
+    pendingDemands,
     nearbyPartners,
     isLoadingPartners,
     files,
@@ -386,6 +423,7 @@ export const useManifestationStore = defineStore('manifestation', () => {
     setFiles,
     submitManifestation,
     startNewDemandFromCrossSell,
+    startNextPendingDemand,
     reset,
   }
 })
